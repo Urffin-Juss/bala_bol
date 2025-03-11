@@ -1,5 +1,6 @@
 from telegram import Update
 from telegram.ext import ContextTypes 
+import CallbackContext 
 import logging
 from dotenv import load_dotenv
 import os
@@ -94,7 +95,76 @@ class Handlers:
             await update.message.reply_text(joke_text)
 
         except Exception as e:
-            //Todo: add comments to project 
+        
         
             logger.error(f"Ошибка в обработчике joke: {e}", exc_info=True)
             await update.message.reply_text("Произошла ошибка при получении шутки. Попробуйте позже.")
+
+
+    async def info(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+
+ 
+
+        try:
+ 
+
+        
+ 
+
+            commands = [
+ 
+
+                "/start - Начать работу с ботом",
+ 
+
+                "/weather <город> - Узнать погоду в указанном городе",
+ 
+
+                "/joke - Получить случайную шутку",
+ 
+
+                "/info - Показать список доступных команд",
+
+                "/penis - test function"
+ 
+
+            ]
+ 
+
+
+ 
+
+
+ 
+
+            await update.message.reply_text("Доступные команды:\n" + "\n".join(commands))
+ 
+
+        except Exception as e:
+ 
+
+            logger.error(f"Ошибка в обработчике info: {e}")
+ 
+
+            await update.message.reply_text("Произошла ошибка при получении списка команд. Попробуйте позже.")
+
+
+
+    async def penis(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        try:      
+            context.user_data['name'] = update.message.from_user.first_name
+            await update.message.reply_text(
+                f"Ты, {context.user_data['name']}, самый главный ХУЙ!!!"
+            )
+
+        except Exception as e:
+            logger.error(f"Ошибка в обработчике start: {e}")
+            await update.message.reply_text("Произошла ошибка. Попробуйте позже.")   
+
+
+
+
+            
+ 
+
+
