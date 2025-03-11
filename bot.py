@@ -14,7 +14,8 @@ class Bot ():
         self.application.add_handler(CommandHandler("start", self.handlers.start))   
         self.application.add_handler(CommandHandler("weather", self.handlers.weather)) 
         self.application.add_handler(CommandHandler("joke", self.handlers.joke))
+        self.application.add_handler(CommandHandler(info, self.handlers.info))
 
     def run(self):
         self.setup_handlers()
-        self.application.run_polling()  
+        self.application.run_polling()      
