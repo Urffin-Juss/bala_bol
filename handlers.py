@@ -94,6 +94,7 @@ class Handlers:
             await update.message.reply_text(joke_text)
 
         except Exception as e:
+            //Todo: add comments to project;
         
             logger.error(f"Ошибка в обработчике joke: {e}", exc_info=True)
             await update.message.reply_text("Произошла ошибка при получении шутки. Попробуйте позже.")
