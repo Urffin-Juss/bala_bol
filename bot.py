@@ -15,7 +15,7 @@ class Bot ():
         self.application.add_handler(CommandHandler("weather", self.handlers.weather)) 
         self.application.add_handler(CommandHandler("joke", self.handlers.joke))
         self.application.add_handler(CommandHandler("info", self.handlers.info))
-        self.application.add_handler(CommandHandler("penis", self.handlers.penis))
+        self.application.add_handler(CommandHandler("titles", self.handlers.assing_titles))
 
     def run(self):
         self.setup_handlers()
