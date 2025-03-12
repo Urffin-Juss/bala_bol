@@ -125,7 +125,7 @@ class Handlers:
 
                 "/info - Показать список доступных команд",
 
-                "/penis - test function"
+                "/penis - test function",
 
                 "/random - Выбирает самого главного кисо в чате"
  
@@ -174,6 +174,12 @@ class Handlers:
 
             
             human_members = [member.user for member in members if not member.user.is_bot]
+            
+            
+            if not human_members:
+                logger.error("Не удалось найти участников чата.")
+                await update.message.reply_text("Не удалось найти кисо в чате :(")
+                return
 
             if human_members:
             
@@ -181,9 +187,10 @@ class Handlers:
 
             
                 await update.message.reply_text(
-                    f"Ты, {chosen_member.mention_markdown()}, сегодня кисо чата!!!"
+                    f"Ты, {chosen_member.first_name()}, сегодня кисо чата!!!"
                 )
             else:
+                logger.error("Не удалось найти участников")
                 await update.message.reply_text("Не удалось найти кисо в чате :(")
         except Exception as e:
         
