@@ -1,10 +1,10 @@
 from telegram import Update
 from telegram.ext import ContextTypes 
-import CallbackContext 
 import logging
 from dotenv import load_dotenv
 import os
 import requests
+import random
 
 
 load_dotenv()
@@ -126,6 +126,8 @@ class Handlers:
                 "/info - Показать список доступных команд",
 
                 "/penis - test function"
+
+                "/random - Выбирает самого главного кисо в чате"
  
 
             ]
@@ -161,6 +163,32 @@ class Handlers:
             logger.error(f"Ошибка в обработчике start: {e}")
             await update.message.reply_text("Произошла ошибка. Попробуйте позже.")   
 
+
+
+   async def random(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        
+        try:
+            
+            chat_id = update.message.chat_id
+            members = await context.bot.get_chat_members(chat_id)
+
+            
+            human_members = [member.user for member in members if not member.user.is_bot]
+
+            if human_members:
+            
+                chosen_member = random.choice(human_members)
+
+            
+                await update.message.reply_text(
+                    f"Ты, {chosen_member.mention_markdown()}, сегодня кисо чата!!!"
+                )
+            else:
+                await update.message.reply_text("Не удалось найти кисо в чате :(")
+        except Exception as e:
+        
+            print(f"Ошибка: {e}")
+            await update.message.reply_text("Произошла ошибка. Попробуйте позже.")
 
 
 
