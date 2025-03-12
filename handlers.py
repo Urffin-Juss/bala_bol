@@ -166,20 +166,15 @@ class Handlers:
 
 
     async def random(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        
         try:
-            
+        
             chat_id = update.message.chat_id
-            members = await context.bot.get_chat_members(chat_id)
 
-            
-            human_members = [member.user for member in members if not member.user.is_bot]
-            
-            
-            if not human_members:
-                logger.error("Не удалось найти участников чата.")
-                await update.message.reply_text("Не удалось найти кисо в чате :(")
-                return
+        
+            admins = await context.bot.get_chat_administrators(chat_id)
+
+        
+            human_members = [admin.user for admin in admins if not admin.user.is_bot]
 
             if human_members:
             
@@ -187,14 +182,15 @@ class Handlers:
 
             
                 await update.message.reply_text(
-                    f"Ты, {chosen_member.first_name()}, сегодня кисо чата!!!"
-                )
+                f"Ты, {chosen_member.mention_html()}, сегодня кисо чата!!!",
+                parse_mode="HTML"
+            )
             else:
-                logger.error("Не удалось найти участников")
                 await update.message.reply_text("Не удалось найти кисо в чате :(")
+            
         except Exception as e:
         
-            print(f"Ошибка: {e}")
+            logger.error(f"Ошибка в обработчике random: {e}", exc_info=True)
             await update.message.reply_text("Произошла ошибка. Попробуйте позже.")
 
 
