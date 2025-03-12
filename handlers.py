@@ -5,6 +5,7 @@ from dotenv import load_dotenv
 import os
 import requests
 import random
+from datetime import datetime, timedelta
 
 
 load_dotenv()
@@ -150,51 +151,50 @@ class Handlers:
 
             await update.message.reply_text("Произошла ошибка при получении списка команд. Попробуйте позже.")
 
-
-
-    async def penis(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        try:      
-            context.user_data['name'] = update.message.from_user.first_name
-            await update.message.reply_text(
-                f"Ты, {context.user_data['name']}, самый главный ХУЙ!!!"
-            )
-
-        except Exception as e:
-            logger.error(f"Ошибка в обработчике start: {e}")
-            await update.message.reply_text("Произошла ошибка. Попробуйте позже.")   
-
-
-
-    async def random(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    
+    
+    
+    async def assing_titles(sself, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         try:
-        
-            chat_id = update.message.chat_id
-
-        
+            
+            chat_id = update.message.chat.id
+            last_called = context.chat_data.get('last_called')
+            
+            if last_called and datetime.now() - last_called < timedelta(hours=24)
+            await update.mesage.reply_text("Только один раз в сутки, котик")
+            
             admins = await context.bot.get_chat_administrators(chat_id)
-
-        
+            
             human_members = [admin.user for admin in admins if not admin.user.is_bot]
 
-            if human_members:
+            if len(human_members) < 2:
+                await update.message.reply_text("В чате должно быть как минимум два участника!")
+                return
             
-                chosen_member = random.choice(human_members)
-
             
-                await update.message.reply_text(
-                f"Ты, {chosen_member.mention_html()}, сегодня кисо чата!!!",
-                parse_mode="HTML"
+            
+            chosen_members = random.sample(human_members, 2)
+            title_x = chosen_members[0]
+            title_y = chosen_members[1]
+            
+            
+            result_message = (
+                
+                f"🎉 Сегодняшние звания:\n"
+                f"🏆 Кисо чата: {title_x.mention_html()}\n"
+                f"🥇 ХУЙ чата: {title_y.mention_html()}"
             )
-            else:
-                await update.message.reply_text("Не удалось найти кисо в чате :(")
+            
+            
+            sent_message = await update.message.reply_text(result_message, parse_mode="HTML")
+            
+            await context.bot.pin_chat_message(chat_id, sent_message.message_id)
+            
+            context.chat_data["last_called"] = datetime.now()
             
         except Exception as e:
-        
-            logger.error(f"Ошибка в обработчике random: {e}", exc_info=True)
-            await update.message.reply_text("Произошла ошибка. Попробуйте позже.")
-
-
-
+            logger.error(f"Ошибка в обработчике assign_titles: {e}", exc_info=True)
+            await update.message.reply_text("Произошла ошибка. Попробуйте позже.")        
             
  
 
