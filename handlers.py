@@ -126,9 +126,7 @@ class Handlers:
 
                 "/info - Показать список доступных команд",
 
-                "/penis - test function",
-
-                "/random - Выбирает самого главного кисо в чате"
+                "/titles - розыгрыш званий"
  
 
             ]
@@ -154,14 +152,14 @@ class Handlers:
     
     
     
-    async def assing_titles(sself, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    async def assing_titles(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         try:
             
             chat_id = update.message.chat.id
             last_called = context.chat_data.get('last_called')
             
-            if last_called and datetime.now() - last_called < timedelta(hours=24)
-            await update.mesage.reply_text("Только один раз в сутки, котик")
+            if last_called and datetime.now() - last_called < timedelta(hours=24) :
+                await update.mesage.reply_text("Только один раз в сутки, котик")
             
             admins = await context.bot.get_chat_administrators(chat_id)
             
