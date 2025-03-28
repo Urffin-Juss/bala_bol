@@ -1,6 +1,5 @@
 from telegram import Update
-from telegram.ext import ContextTypes 
-import logging
+from telegram.ext import ContextTypes
 from dotenv import load_dotenv
 import os
 import requests
@@ -59,7 +58,7 @@ class Handlers:
             await update.message.reply_text(weather_message)
 
         except Exception as e:
-            logger.error(f"Ошибка в обработчике weather: {e}")
+            await logger.error(f"Ошибка в обработчике weather: {e}")
             await update.message.reply_text("Произошла ошибка при запросе погоды. Попробуйте позже.")
 
     async def joke(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -87,7 +86,7 @@ class Handlers:
                 joke_text = response.text.replace('{"content":"', '').replace('"}', '')
                 logger.info(f"Данные API: {joke_text}")
             except Exception as e:
-                logger.error(f"Ошибка при обработке ответа API: {e}")
+                await logger.error(f"Ошибка при обработке ответа API: {e}")
                 await update.message.reply_text("Не удалось обработать шутку. Попробуйте позже.")
                 return
 
@@ -97,7 +96,7 @@ class Handlers:
         except Exception as e:
         
         
-            logger.error(f"Ошибка в обработчике joke: {e}", exc_info=True)
+            await logger.error(f"Ошибка в обработчике joke: {e}", exc_info=True)
             await update.message.reply_text("Произошла ошибка при получении шутки. Попробуйте позже.")
 
 

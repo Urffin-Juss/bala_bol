@@ -1,30 +1,28 @@
 from bot import Bot
 from dotenv import load_dotenv
-import logging
 import os
 import requests
+imoprt asyncio
+from logger_service import logger
 
 
-logging.basicConfig(
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    level=logging.INFO
-)
-logger = logging.getLogger(__name__)
-
-def main() -> None:
+async def async_main() -> None:
 
     load_dotenv()
 
     
     token = os.getenv('TELEGRAM_BOT_TOKEN')
     if not token:
-        logger.error("Токен не найден в переменных окружения. Проверьте файл .env")
+        await logger.error("Токен не найден в переменных окружения. Проверьте файл .env")
         raise ValueError("Токен не найден в переменных окружения. Проверьте файл .env")
 
     
-    logger.info("Запуск бота....")
+    await logger.info("Запуск бота....")
     bot = Bot(token=token)
-    bot.run()
+    await bot.run()
+def main() -> None:
+    asyncio.run(async_main())
+
 
 if __name__ == '__main__':
     main()
