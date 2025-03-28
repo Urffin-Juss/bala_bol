@@ -2,7 +2,7 @@ from bot import Bot
 from dotenv import load_dotenv
 import logging
 import os
-import requests
+
 
 
 logging.basicConfig(
