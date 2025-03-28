@@ -35,15 +35,13 @@ async def setup_handlers(self):
             raise
 
 
-async def run(self):
-
+def main() -> None:
     try:
-        await logger.info("Starting polling...")
-        await self.application.run_polling()
+        asyncio.run(async_main())
+    except KeyboardInterrupt:
+        print("\nБот остановлен")
     except Exception as e:
-        await logger.critical(f"Бот упал: {e}", exc_info=True)
-        raise
-    finally:
-        await logger.warning("Бот остановлен")
-        self.setup_handlers()
-        self.application.run_polling()      
+        print(f"Фатальная ошибка: {e}")
+
+if __name__ == '__main__':
+    main()
