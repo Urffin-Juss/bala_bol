@@ -159,7 +159,8 @@ class Handlers:
             last_called = context.chat_data.get('last_called')
             
             if last_called and datetime.now() - last_called < timedelta(hours=24) :
-                await update.mesage.reply_text("Только один раз в сутки, котик")
+                await update.message.reply_text("Только один раз в сутки, котик")
+                return
             
             admins = await context.bot.get_chat_administrators(chat_id)
             
@@ -182,17 +183,17 @@ class Handlers:
                 f"🏆 Кисо чата: {title_x.mention_html()}\n"
                 f"🥇 ХУЙ чата: {title_y.mention_html()}"
             )
-            
-            
+
+
             sent_message = await update.message.reply_text(result_message, parse_mode="HTML")
-            
+
             await context.bot.pin_chat_message(chat_id, sent_message.message_id)
-            
+
             context.chat_data["last_called"] = datetime.now()
-            
+
         except Exception as e:
             logger.error(f"Ошибка в обработчике assign_titles: {e}", exc_info=True)
-            await update.message.reply_text("Произошла ошибка. Попробуйте позже.")        
+            await update.message.reply_text("Произошла ошибка. Попробуйте позже.")
             
  
 
