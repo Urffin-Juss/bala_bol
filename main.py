@@ -4,7 +4,6 @@ import logging
 import os
 import sys
 
-# Настройка логирования
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     level=logging.INFO,
@@ -18,10 +17,10 @@ logger = logging.getLogger(__name__)
 
 def main() -> None:
     try:
-        # Загрузка переменных окружения
+        
         load_dotenv()
 
-        # Получение токена
+        
         token = os.getenv('TELEGRAM_BOT_TOKEN')
         if not token:
             logger.error("Токен не найден. Проверьте:")

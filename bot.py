@@ -1,4 +1,5 @@
-from telegram.ext import Application, MessageHandler, filters
+from telegram import Update
+from telegram.ext import Application, MessageHandler, filters, ContextTypes
 import os
 from handlers import Handlers
 
