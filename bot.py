@@ -1,5 +1,4 @@
 from telegram.ext import Application, MessageHandler, filters
-from telegram import Update
 import os
 from handlers import Handlers
 
@@ -17,13 +16,15 @@ class Bot:
 
     def run(self):
         self.setup_handlers()
-        print("Bot is activated... Knok-knok, Neo, the matrix has you")
+        print("Бот запущен и готов к работе! 🚀")
         self.application.run_polling()
 
 
 if __name__ == "__main__":
     token = os.getenv("TELEGRAM_BOT_TOKEN")
     if not token:
-        raise ValueError("TELEGRAM_BOT_TOKEN environment variable is not set")
+        print("Ошибка: Токен не найден! Создайте файл .env с TELEGRAM_BOT_TOKEN=ваш_токен")
+        exit(1)
+
     bot = Bot(token)
     bot.run()
