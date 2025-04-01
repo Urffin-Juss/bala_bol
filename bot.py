@@ -1,8 +1,6 @@
-from telegram import Update
-from telegram.ext import Application, MessageHandler, filters, ContextTypes
+from telegram.ext import Application, MessageHandler, filters
 import os
 from handlers import Handlers
-
 
 class Bot:
     def __init__(self, token):
@@ -15,11 +13,10 @@ class Bot:
             MessageHandler(filters.TEXT & ~filters.COMMAND, self.handlers.handle_text)
         )
 
-    def run(self):
+    async def run(self): 
         self.setup_handlers()
         print("Бот запущен и готов к работе! 🚀")
-        self.application.run_polling()
-
+        await self.application.run_polling()  
 
 if __name__ == "__main__":
     token = os.getenv("TELEGRAM_BOT_TOKEN")
@@ -28,4 +25,7 @@ if __name__ == "__main__":
         exit(1)
 
     bot = Bot(token)
-    bot.run()
+    
+    # Запускаем асинхронно
+    import asyncio
+    asyncio.run(bot.run())
