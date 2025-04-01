@@ -1,5 +1,5 @@
 from telegram import Update
-from telegram.ext import ContextTypes 
+from telegram.ext import ContextTypes
 import logging
 from dotenv import load_dotenv
 import os
@@ -14,63 +14,67 @@ logger = logging.getLogger(__name__)
 class Handlers:
     def __init__(self):
         self.bot_names = ["бот", "лёва", "лимонадный", "дружище", "лева", "лев"]
-        self.bot_mention_pattern = re.compile(
-            r'\b(бот|лёва|лимонадный|дружище|лева|лев)[,\.!]*\b',
-            re.IGNORECASE
-        )
-        # Изменяем структуру хранения команд
-        self.command_keywords = {
-            "погода": "weather",
-            "шутка": "joke",
-            "команды": "info",
-            "звания": "assign_titles",
-            "старт": "start"
+        self.command_patterns = {
+            r'(^|\s)(шутк|анекдот|пошути|рассмеши)': self.joke,
+            r'(^|\s)(расскажи|дай|хочу|го)\s*(шутку|анекдот)': self.joke,            
+            r'(^|\s)(какая|узнать|скажи)\s*(погода|погоду)\s*(в|по)?\s*([а-яё]+)': self.weather,
+            r'(^|\s)(погода|погоду)\s*(в|по)?\s*([а-яё]+)': self.weather,
+            r'(^|\s)(команды|что умеешь|помощь|help)': self.info,
+            r'(^|\s)(звания|розыгрыш|титулы)': self.assign_titles,
+            r'(^|\s)(старт|начать|привет|hello)': self.start_handler
         }
 
     def is_message_for_bot(self, text: str) -> bool:
-        """Проверяет, обращается ли пользователь к боту"""
+    
         if not text:
             return False
-            
-        if self.bot_mention_pattern.search(text):
-            return True
             
         first_word = text.split()[0].lower()
         if first_word in self.bot_names:
             return True
             
-        return False
+        return any(name in text.lower() for name in self.bot_names)
 
     async def process_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        user_text = update.message.text
+        user_text = update.message.text.lower()
         
         if not self.is_message_for_bot(user_text):
             return
-            
-        cleaned_text = self.bot_mention_pattern.sub('', user_text).strip()
-        cleaned_text = cleaned_text.lower()
 
-        for keyword, method_name in self.command_keywords.items():
-            if keyword in cleaned_text:
-                method = getattr(self, method_name)
-                await method(update, context)
+        
+        cleaned_text = re.sub(r'^\s*(бот|лёва|лева|дружище)[,\.!]*\s*', '', user_text)
+        
+        
+        for pattern, handler in self.command_patterns.items():
+            if re.search(pattern, cleaned_text):
+                await handler(update, context, cleaned_text)
                 return
                 
         await self.handle_text(update, context, cleaned_text)
 
-    async def weather(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        """Обработчик команды погоды"""
+    async def start_handler(self, update: Update, context: ContextTypes.DEFAULT_TYPE, text: str):
+        """Обработчик приветствия"""
         try:
-            user_text = update.message.text.lower()
-            city = None
-            
-            if "погода" in user_text:
-                parts = user_text.split("погода")[1].strip().split()
-                if parts:
-                    city = parts[0]
+            await update.message.reply_text(
+                f"Привет! Я бот Лёва. Можешь попросить меня:\n"
+                f"- Рассказать шутку\n"
+                f"- Сообщить погоду\n"
+                f"- Разыграть звания в чате\n"
+                f"Просто напиши что-то вроде 'Лёва, расскажи шутку'"
+            )
+        except Exception as e:
+            logger.error(f"Start error: {e}")
+            await update.message.reply_text("Не смог обработать запрос")
+
+    async def weather(self, update: Update, context: ContextTypes.DEFAULT_TYPE, text: str):
+        """Обработчик запросов погоды"""
+        try:
+            # Ищем город в тексте
+            match = re.search(r'погод[а-я]*\s*(?:в|по)?\s*([а-яё]+)', text)
+            city = match.group(1) if match else None
             
             if not city:
-                await update.message.reply_text("Напиши мне, например: 'Лёва, какая погода в Москве?'")
+                await update.message.reply_text("Напиши например: 'Лева, какая погода в Москве?' или 'Лева, погода в Питере'")
                 return
 
             api_key = os.getenv('OPENWEATHER_API_KEY')
@@ -101,11 +105,11 @@ class Handlers:
             await update.message.reply_text(weather_message)
 
         except Exception as e:
-            logger.error(f"Ошибка в weather: {e}")
+            logger.error(f"Ошибка в погоде: {e}")
             await update.message.reply_text("Произошла ошибка при запросе погоды. Попробуй позже.")
 
-    async def joke(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        """Обработчик команды шутки"""
+    async def joke(self, update: Update, context: ContextTypes.DEFAULT_TYPE, text: str):
+        """Обработчик запросов шуток"""
         try:
             url = "http://rzhunemogu.ru/RandJSON.aspx?CType=1"  
             response = requests.get(url, timeout=5)
@@ -118,26 +122,26 @@ class Handlers:
             await update.message.reply_text(joke_text)
 
         except Exception as e:
-            logger.error(f"Ошибка в joke: {e}")
+            logger.error(f"Ошибка в шутке: {e}")
             await update.message.reply_text("Произошла ошибка при получении шутки. Попробуй позже.")
 
-    async def info(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        """Обработчик команды информации"""
+    async def info(self, update: Update, context: ContextTypes.DEFAULT_TYPE, text: str):
+        
         try:
             commands = [
-                "бот/лёва + [команда] - обращение к боту",
-                "погода [город] - узнать погоду",
-                "шутка - получить случайную шутку",
-                "команды - показать это сообщение",
-                "звания - розыгрыш званий (раз в сутки)"
+                "Как общаться со мной:",
+                "- 'Лёва, расскажи шутку'",
+                "- 'Лёва, какая погода в Москве'",
+                "- 'Лёва, разыграй звания'",
+                "- 'Лёва, что ты умеешь?'"
             ]
-            await update.message.reply_text("Как со мной общаться:\n" + "\n".join(commands))
+            await update.message.reply_text("\n".join(commands))
         except Exception as e:
             logger.error(f"Ошибка в info: {e}")
             await update.message.reply_text("Произошла ошибка. Попробуй позже.")
     
-    async def assign_titles(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        """Обработчик команды розыгрыша званий"""
+    async def assign_titles(self, update: Update, context: ContextTypes.DEFAULT_TYPE, text: str):
+        
         try:
             chat_id = update.message.chat.id
             last_called = context.chat_data.get('last_called')
@@ -172,38 +176,20 @@ class Handlers:
             await update.message.reply_text("Произошла ошибка. Попробуй позже.")
             
     async def handle_text(self, update: Update, context: ContextTypes.DEFAULT_TYPE, cleaned_text: str):
-        """Обработчик общего текста"""
-        greetings = [
-            "Привет-привет! 😃",
-            "Здорово, что заглянул! 👍", 
-            "Йоу! Чё как? 😎"
-        ]
-
-        farewells = [
-            "Пока-пока! 🖐️",
-            "Уже уходишь? Ну ладно... 😢",
-            "До скорого! Мне будет скучно... 🥺"
-        ]
+        
+        greetings = ["Привет-привет! 😃", "Здорово, что заглянул! 👍", "Йоу! Чё как? 😎"]
+        farewells = ["Пока-пока! 🖐️", "Уже уходишь? Ну ладно... 😢", "До скорого! 🥺"]
 
         if any(word in cleaned_text for word in ["привет", "здравствуй", "хай"]):
             await update.message.reply_text(random.choice(greetings))
         elif any(word in cleaned_text for word in ["пока", "до свидания", "прощай"]):
             await update.message.reply_text(random.choice(farewells))
         elif "как тебя зовут" in cleaned_text:
-            await update.message.reply_text("Меня зовут Лёва! 🎉")
-        elif "шутка" in cleaned_text:
-            await self.joke(update, context)
-        elif "погода" in cleaned_text:
-            await self.weather(update, context)
-        elif any(word in cleaned_text for word in ["команды", "что умеешь"]):
-            await self.info(update, context)
-        elif "звания" in cleaned_text:
-            await self.assign_titles(update, context)
+            await update.message.reply_text("Меня зовут Лёва Лимонадов! 🎉")
         else:
             neutral_answers = [
                 "Честно говоря, я не понял... 🤔",
                 "Можешь перефразировать? 🧐",
-                "Я пока только учусь. Спроси что-нибудь попроще! 😅",
                 "Попробуй сказать 'Лёва, что ты умеешь?'"
             ]
             await update.message.reply_text(random.choice(neutral_answers))

@@ -53,8 +53,8 @@ class Bot:
         print("Бот запущен и готов к работе! 🚀")
         try:
             self.application.run_polling(
-                drop_pending_updates=True,  # Игнорировать сообщения, отправленные пока бот был оффлайн
-                allowed_updates=Update.ALL_TYPES  # Теперь Update определен
+                drop_pending_updates=True,  
+                allowed_updates=Update.ALL_TYPES  
             )
         except KeyboardInterrupt:
             print("\nБот остановлен пользователем")
