@@ -13,10 +13,10 @@ class Bot:
             MessageHandler(filters.TEXT & ~filters.COMMAND, self.handlers.handle_text)
         )
 
-    async def run(self): 
+    def run(self):  
         self.setup_handlers()
         print("Бот запущен и готов к работе! 🚀")
-        await self.application.run_polling()  
+        self.application.run_polling()  
 
 if __name__ == "__main__":
     token = os.getenv("TELEGRAM_BOT_TOKEN")
@@ -25,7 +25,4 @@ if __name__ == "__main__":
         exit(1)
 
     bot = Bot(token)
-    
-    # Запускаем асинхронно
-    import asyncio
-    asyncio.run(bot.run())
+    bot.run()  
