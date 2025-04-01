@@ -12,8 +12,9 @@ load_dotenv()
 logger = logging.getLogger(__name__)
 
 class Handlers:
-    def __init__(self):
+    def __init__(self, db=None):
         self.bot_names = ["бот", "лёва", "лимонадный", "дружище", "лева", "лев"]
+        self.db = db
         self.command_patterns = {
             r'(^|\s)(шутк|анекдот|пошути|рассмеши)': self.joke,
             r'(^|\s)(расскажи|дай|хочу|го)\s*(шутку|анекдот)': self.joke,            
@@ -21,9 +22,11 @@ class Handlers:
             r'(^|\s)(погода|погоду)\s*(в|по)?\s*([а-яё]+)': self.weather,
             r'(^|\s)(команды|что умеешь|помощь|help)': self.info,
             r'(^|\s)(звания|розыгрыш|титулы)': self.assign_titles,
-            r'(^|\s)(старт|начать|привет|hello)': self.start_handler
+            r'(^|\s)(старт|начать|привет|hello)': self.start_handler,
+            r'(^|\s)(цтт)': lambda u, c: self.handle_quote_command(u, c),
+            r'(^|\s)(старт|начать|привет|hello)': lambda u, c: self.start_handler(u, c)
         }
-
+        
     def is_message_for_bot(self, text: str) -> bool:
     
         if not text:
@@ -36,24 +39,28 @@ class Handlers:
         return any(name in text.lower() for name in self.bot_names)
 
     async def process_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        user_text = update.message.text.lower()
+    
+        if update.message.reply_to_message and update.message.text.lower().strip() == "цтт":
+            await self._add_quote_from_reply(update, context)
+            return
         
+        user_text = update.message.text.lower() if update.message.text else ""
+    
         if not self.is_message_for_bot(user_text):
             return
 
-        
         cleaned_text = re.sub(r'^\s*(бот|лёва|лева|дружище)[,\.!]*\s*', '', user_text)
-        
-        
+    
+    
         for pattern, handler in self.command_patterns.items():
             if re.search(pattern, cleaned_text):
-                await handler(update, context, cleaned_text)
+                await handler(update, context)  # Все обработчики теперь принимают только update и context
                 return
-                
-        await self.handle_text(update, context, cleaned_text)
+            
+        await self.handle_text(update, context)
 
-    async def start_handler(self, update: Update, context: ContextTypes.DEFAULT_TYPE, text: str):
-        """Обработчик приветствия"""
+    async def start_handler(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        
         try:
             await update.message.reply_text(
                 f"Привет! Я бот Лёва. Можешь попросить меня:\n"
@@ -193,3 +200,75 @@ class Handlers:
                 "Попробуй сказать 'Лёва, что ты умеешь?'"
             ]
             await update.message.reply_text(random.choice(neutral_answers))
+            
+            
+            
+    async def _add_quote_from_reply(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+  
+        if not self.db:
+            await update.message.reply_text("❌ Система цитат недоступна")
+            return
+        
+        if not update.message.reply_to_message:
+            await update.message.reply_text("⚠️ Это не ответ на сообщение")
+            return
+        
+        original = update.message.reply_to_message
+        user = update.message.from_user
+    
+        if not original.text:
+            await update.message.reply_text("⚠️ Можно сохранять только текстовые сообщения")
+            return
+        
+        text = original.text.strip()
+        
+        if len(text) > 500:
+            await update.message.reply_text("⚠️ Слишком длинная цитата (максимум 500 символов)")
+            return
+        if len(text) < 5:
+            await update.message.reply_text("⚠️ Цитата слишком короткая")
+            return
+        
+        try:
+            if self.db.add_quote(user.id, user.full_name, text):
+                username = f"@{user.username}" if user.username else user.full_name
+                await update.message.reply_text("✅ Цитата успешно сохранена!")
+                await original.reply_text(f"💾 Сохранено как цитата от {username}")
+            else:
+                await update.message.reply_text("❌ Не удалось сохранить цитату")
+        except Exception as e:
+            logger.error(f"Ошибка при сохранении цитаты: {e}", exc_info=True)
+            await update.message.reply_text("⚠️ Произошла ошибка при сохранении")
+
+    async def handle_quote_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+    
+        if not self.db:
+            await update.message.reply_text("❌ Система цитат недоступна")
+            return
+        
+        try:
+            quote = self.db.get_random_quote()
+            if quote and 'text' in quote and 'user_name' in quote:
+                response = f"📌 Цитата #{quote.get('id', '')}:\n\n{quote['text']}\n\n— {quote['user_name']}"
+                await update.message.reply_text(response)
+            else:
+                await update.message.reply_text("📭 Пока нет сохранённых цитат")
+        except Exception as e:
+            logger.error(f"Ошибка при получении цитаты: {e}")
+            await update.message.reply_text("⚠️ Ошибка при получении цитаты")
+            
+            
+            
+    # Временный дебагхантер
+    
+    async def handle_quote_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+    
+        self.db.debug_quotes()  
+    
+        quote = self.db.get_random_quote()
+        print(f"DEBUG: Полученная цитата: {quote}")  
+    
+        if quote:
+            await update.message.reply_text(f"Цитата #{quote['id']}:\n{quote['text']}")
+        else:
+            await update.message.reply_text("Нет одобренных цитат")        
