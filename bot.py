@@ -32,6 +32,16 @@ class Bot:
                 self.handlers.handle_quote_command
             )
         )
+        
+        
+        self.app.add_handler(
+            MessageHandler(
+                filters.TEXT & filters.Regex(
+                    r'(?i)(^|\s)(мудрость|мудростью|скажи мудрость|дай мудрость)'
+                ),
+                self.handlers.wisdom  # Исправлено на правильное название метода
+            )
+        )    
     
     # Общий обработчик текстовых сообщений
         self.app.add_handler(
@@ -42,6 +52,9 @@ class Bot:
         )
     def run(self):
         self.app.run_polling()
+        
+        
+
 
 if __name__ == "__main__":
     token = os.getenv("TELEGRAM_BOT_TOKEN")

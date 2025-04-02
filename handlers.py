@@ -7,6 +7,7 @@ import requests
 import random
 from datetime import datetime, timedelta
 import re
+from pathlib import Path
 
 load_dotenv()
 logger = logging.getLogger(__name__)
@@ -15,17 +16,50 @@ class Handlers:
     def __init__(self, db=None):
         self.bot_names = ["бот", "лёва", "лимонадный", "дружище", "лева", "лев"]
         self.db = db
+        self.wisdom_quotes = []
+        
+        try:
+            current_dir = Path(__file__).parent
+            quotes_file = current_dir / "data" / "wisdom_quotes.txt"
+            with open(quotes_file, "r", encoding="utf-8") as f:
+                for line in f:
+                    if "|" in line:
+                        text, author = line.strip().split("|", 1)
+                        self.wisdom_quotes.append({
+                            "text": text,
+                            "author": author
+                        })
+            logger.info(f"Загружено {len(self.wisdom_quotes)} цитат мудрости")
+        except Exception as e:
+            logger.error(f"Ошибка загрузки цитат: {e}")
+            self.wisdom_quotes = []
+            
         self.command_patterns = {
-            r'(^|\s)(шутк|анекдот|пошути|рассмеши)': self.joke,
-            r'(^|\s)(расскажи|дай|хочу|го)\s*(шутку|анекдот)': self.joke,            
-            r'(^|\s)(какая|узнать|скажи)\s*(погода|погоду)\s*(в|по)?\s*([а-яё]+)': self.weather,
-            r'(^|\s)(погода|погоду)\s*(в|по)?\s*([а-яё]+)': self.weather,
-            r'(^|\s)(команды|что умеешь|помощь|help)': self.info,
-            r'(^|\s)(звания|розыгрыш|титулы)': self.assign_titles,
-            r'(^|\s)(старт|начать|привет|hello)': self.start_handler,
+            r'(^|\s)(шутк|анекдот|пошути|рассмеши)': lambda u, c: self.joke(u, c),
+            r'(^|\s)(расскажи|дай|хочу|го)\s*(шутку|анекдот)': lambda u, c: self.joke(u, c),            
+            r'(^|\s)(какая|узнать|скажи)\s*(погода|погоду)\s*(в|по)?\s*([а-яё]+)': lambda u, c: self.weather(u, c),
+            r'(^|\s)(погода|погоду)\s*(в|по)?\s*([а-яё]+)': lambda u, c: self.weather(u, c),
+            r'(^|\s)(команды|что умеешь|помощь|help)': lambda u, c: self.info(u, c),
+            r'(^|\s)(звания|розыгрыш|титулы)': lambda u, c: self.assign_titles(u, c),
+            r'(^|\s)(старт|начать|привет|hello)': lambda u, c: self.start_handler(u, c),
             r'(^|\s)(цтт)': lambda u, c: self.handle_quote_command(u, c),
-            r'(^|\s)(старт|начать|привет|hello)': lambda u, c: self.start_handler(u, c)
+            r'(?i)(^|\s)(мудрость|мудростью|скажи мудрость|дай мудрость)': lambda u, c: self.wisdom(u, c)
         }
+
+    async def wisdom(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Обработчик запросов мудростей"""
+        try:
+            if not self.wisdom_quotes:
+                await update.message.reply_text("База мудростей пока пуста 😢")
+                return
+            
+            quote = random.choice(self.wisdom_quotes)
+            response = f"«{quote['text']}»\n\n— {quote['author']}"
+            await update.message.reply_text(response)
+            
+        except Exception as e:
+            logger.error(f"Ошибка в wisdom: {e}")
+            await update.message.reply_text("Произошла ошибка при поиске мудрости. Попробуй позже.")
         
     def is_message_for_bot(self, text: str) -> bool:
     
@@ -37,6 +71,23 @@ class Handlers:
             return True
             
         return any(name in text.lower() for name in self.bot_names)
+    
+    
+    
+    async def wisdom(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Обработчик запросов мудростей"""
+        try:
+            if not self.wisdom_quotes:
+                await update.message.reply_text("База мудростей пока пуста 😢")
+                return
+            
+            quote = random.choice(self.wisdom_quotes)
+            response = f"«{quote['text']}»\n\n— {quote['author']}"
+            await update.message.reply_text(response)
+            
+        except Exception as e:
+            logger.error(f"Ошибка в wisdom: {e}")
+            await update.message.reply_text("Произошла ошибка при поиске мудрости. Попробуй позже.")
 
     async def process_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
     
@@ -54,7 +105,7 @@ class Handlers:
     
         for pattern, handler in self.command_patterns.items():
             if re.search(pattern, cleaned_text):
-                await handler(update, context)  # Все обработчики теперь принимают только update и context
+                await handler(update, context)  
                 return
             
         await self.handle_text(update, context)
@@ -73,11 +124,11 @@ class Handlers:
             logger.error(f"Start error: {e}")
             await update.message.reply_text("Не смог обработать запрос")
 
-    async def weather(self, update: Update, context: ContextTypes.DEFAULT_TYPE, text: str):
+    async def weather(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Обработчик запросов погоды"""
         try:
-            # Ищем город в тексте
-            match = re.search(r'погод[а-я]*\s*(?:в|по)?\s*([а-яё]+)', text)
+            user_text = update.message.text.lower()
+            match = re.search(r'погод[а-я]*\s*(?:в|по)?\s*([а-яё]+)', user_text)
             city = match.group(1) if match else None
             
             if not city:
@@ -115,7 +166,7 @@ class Handlers:
             logger.error(f"Ошибка в погоде: {e}")
             await update.message.reply_text("Произошла ошибка при запросе погоды. Попробуй позже.")
 
-    async def joke(self, update: Update, context: ContextTypes.DEFAULT_TYPE, text: str):
+    async def joke(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Обработчик запросов шуток"""
         try:
             url = "http://rzhunemogu.ru/RandJSON.aspx?CType=1"  
@@ -127,12 +178,12 @@ class Handlers:
         
             joke_text = response.text.replace('{"content":"', '').replace('"}', '')
             await update.message.reply_text(joke_text)
-
+            pass
         except Exception as e:
             logger.error(f"Ошибка в шутке: {e}")
             await update.message.reply_text("Произошла ошибка при получении шутки. Попробуй позже.")
 
-    async def info(self, update: Update, context: ContextTypes.DEFAULT_TYPE, text: str):
+    async def info(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         try:
             commands = [
@@ -147,7 +198,7 @@ class Handlers:
             logger.error(f"Ошибка в info: {e}")
             await update.message.reply_text("Произошла ошибка. Попробуй позже.")
     
-    async def assign_titles(self, update: Update, context: ContextTypes.DEFAULT_TYPE, text: str):
+    async def assign_titles(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         try:
             chat_id = update.message.chat.id
@@ -182,7 +233,7 @@ class Handlers:
             logger.error(f"Ошибка в assign_titles: {e}")
             await update.message.reply_text("Произошла ошибка. Попробуй позже.")
             
-    async def handle_text(self, update: Update, context: ContextTypes.DEFAULT_TYPE, cleaned_text: str):
+    async def handle_text(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         greetings = ["Привет-привет! 😃", "Здорово, что заглянул! 👍", "Йоу! Чё как? 😎"]
         farewells = ["Пока-пока! 🖐️", "Уже уходишь? Ну ладно... 😢", "До скорого! 🥺"]
