@@ -234,22 +234,26 @@ class Handlers:
             await update.message.reply_text("Произошла ошибка. Попробуй позже.")
             
     async def handle_text(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+   
+        if not update.message or not update.message.text:
+            return
         
+        user_text = update.message.text.lower()
         greetings = ["Привет-привет! 😃", "Здорово, что заглянул! 👍", "Йоу! Чё как? 😎"]
         farewells = ["Пока-пока! 🖐️", "Уже уходишь? Ну ладно... 😢", "До скорого! 🥺"]
 
-        if any(word in cleaned_text for word in ["привет", "здравствуй", "хай"]):
+        if any(word in user_text for word in ["привет", "здравствуй", "хай"]):
             await update.message.reply_text(random.choice(greetings))
-        elif any(word in cleaned_text for word in ["пока", "до свидания", "прощай"]):
+        elif any(word in user_text for word in ["пока", "до свидания", "прощай"]):
             await update.message.reply_text(random.choice(farewells))
-        elif "как тебя зовут" in cleaned_text:
+        elif "как тебя зовут" in user_text:
             await update.message.reply_text("Меня зовут Лёва Лимонадов! 🎉")
         else:
             neutral_answers = [
                 "Честно говоря, я не понял... 🤔",
                 "Можешь перефразировать? 🧐",
                 "Попробуй сказать 'Лёва, что ты умеешь?'"
-            ]
+        ]
             await update.message.reply_text(random.choice(neutral_answers))
             
             
