@@ -45,7 +45,7 @@ class Handlers:
             r'(^|\s)(звания|розыгрыш|титулы)': lambda u, c: self.assign_titles(u, c),
             r'(^|\s)(старт|начать|привет|hello)': lambda u, c: self.start_handler(u, c),
             r'(^|\s)(цтт)': lambda u, c: self.handle_quote_command(u, c),
-            r'(?i)(^|\s)(мудрость|мудростью|скажи мудрость|дай мудрость)': lambda u, c: self.wisdom(u, c)
+            r'(?i)(^|\s)(мудрость|мудростью|скажи мудрость|дай мудрость)': lambda u, c: self.wisdom(u, c),
             r'(^|\s)(ответь|спроси|deepseek|ask)': self.ask_deepseek,
             r'(^|\s)(ответь на вопрос|что думаешь)': self.ask_deepseek
             
