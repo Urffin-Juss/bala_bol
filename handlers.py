@@ -45,9 +45,9 @@ class Handlers:
             r'(^|\s)(звания|розыгрыш|титулы)': lambda u, c: self.assign_titles(u, c),
             r'(^|\s)(старт|начать|привет|hello)': lambda u, c: self.start_handler(u, c),
             r'(^|\s)(цтт)': lambda u, c: self.handle_quote_command(u, c),
-            r'(?i)(^|\s)(мудрость|мудростью|скажи мудрость|дай мудрость)': lambda u, c: self.wisdom(u, c)
-            r'(^|\s)(ответь|спроси|deepseek|ask)': self.ask_deepseek,
-            r'(^|\s)(ответь на вопрос|что думаешь)': self.ask_deepseek
+            r'(?i)(^|\s)(мудрость|мудростью|скажи мудрость|дай мудрость)': lambda u, c: self.wisdom(u, c),
+            r'(^|\s)(ответь|спроси|deepseek|ask)': self.ask_deepseek
+        
             
         }
 
@@ -334,6 +334,21 @@ class Handlers:
                 "temperature": 0.7,
                 "max_tokens": 1000
             }
+            
+            response = requests.post(
+                self.deepseek_api_url,
+                headers=headers,
+                json=payload,
+                timeout=10
+            )    
+            
+            if response.status_code != 200:
+                raise Exception(f"API error: {response.text}")  
+                
+            answer = response.json()["choices"][0]["message"]["content"]     
+            
+            clean_answer = answer.split("\n")[0]  # Берем первую строку для краткости
+            await update.message.reply_text(f"🔍 DeepSeek отвечает:\n\n{clean_answer}") 
             
             response = requests.post(
                 self.deepseek_api_url,
