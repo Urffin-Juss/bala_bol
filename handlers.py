@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 class Handlers:
     def __init__(self, db=None):
         self.deepseek_api_key = os.getenv("DEEPSEEK_API_KEY")
-        self.deepseek_api_url = "https://api.deepseek.com"
+        self.deepseek_api_url = "https://api.deepseek.com/v1/chat/completions"
         self.bot_names = ["бот", "лёва", "лимонадный", "дружище", "лева", "лев"]
         self.db = db
         self.wisdom_quotes = []
@@ -48,8 +48,8 @@ class Handlers:
             r'(^|\s)(старт|начать|привет|hello)': lambda u, c: self.start_handler(u, c),
             r'(^|\s)(цтт)': lambda u, c: self.handle_quote_command(u, c),
             r'(?i)(^|\s)(мудрость|мудростью|скажи мудрость|дай мудрость)': lambda u, c: self.wisdom(u, c),
-            r'(^|\s)(ответь|спроси|deepseek|ask)': self.ask_deepseek,
-            r'(^|\s)(ответь на вопрос|что думаешь)': self.ask_deepseek
+            r'(^|\s)(ответь|спроси|deepseek|ask)': lambda u, c: self.ask_deepseek(u, c),
+            r'(^|\s)(ответь на вопрос|что думаешь)': lambda u, c: self.ask_deepseek(u, c)
 
         }
 
@@ -330,17 +330,21 @@ class Handlers:
                 "max_tokens": 1000
             }
 
-            response = requests.post(
-                "https://api.deepseek.com/v1/chat/completions",  # Важно: /v1/
-                headers=headers,
-                json=payload
-            ).json()
+            response = requests.post(self.deepseek_api_url, headers=headers, json=payload)
 
-            answer = response["choices"][0]["message"]["content"]
+            if response.status_code != 200:
+                logger.error(f"Ошибка API: {response.status_code} {response.text}")
+                await update.message.reply_text("⚠️ Ошибка API. Попробуйте позже.")
+                return
+
+            data = response.json()
+            logger.debug(f"Ответ API: {data}")  # Логируем ответ для отладки
+
+            answer = data.get("choices", [{}])[0].get("message", {}).get("content", "Не удалось получить ответ")
             await update.message.reply_text(answer)
 
         except Exception as e:
-            logger.error(f"DeepSeek API error: {e}")
+            logger.error(f"DeepSeek API error: {e}", exc_info=True)
             await update.message.reply_text("⚠️ Ошибка. Попробуйте позже.")
 
     # Временный дебагхантер
