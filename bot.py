@@ -25,7 +25,7 @@ class Bot:
             )
         )
     
-    # Обработчик запроса случайной цитаты
+    
         self.app.add_handler(
             MessageHandler(
                 filters.Regex(r'^цтт$') & ~filters.REPLY,
@@ -42,8 +42,18 @@ class Bot:
                 self.handlers.wisdom  # Исправлено на правильное название метода
             )
         )    
+        
+        
+        self.app.add_handler(
+            MessageHandler(
+                filters.TEXT & filters.Regex(
+                    r'(?i)(ответь|спроси|deepseek|ask|что думаешь)'
+                ),
+                self.handlers.ask_deepseek
+            )
+        )
     
-    # Общий обработчик текстовых сообщений
+    
         self.app.add_handler(
             MessageHandler(
                 filters.TEXT & ~filters.COMMAND,

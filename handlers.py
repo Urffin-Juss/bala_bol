@@ -14,6 +14,8 @@ logger = logging.getLogger(__name__)
 
 class Handlers:
     def __init__(self, db=None):
+        self.deepseek_api_key = os.getenv("DEEPSEEK_API_KEY")  
+        self.deepseek_api_url = "https://api.deepseek.com/v1/chat/completions"      
         self.bot_names = ["бот", "лёва", "лимонадный", "дружище", "лева", "лев"]
         self.db = db
         self.wisdom_quotes = []
@@ -44,6 +46,9 @@ class Handlers:
             r'(^|\s)(старт|начать|привет|hello)': lambda u, c: self.start_handler(u, c),
             r'(^|\s)(цтт)': lambda u, c: self.handle_quote_command(u, c),
             r'(?i)(^|\s)(мудрость|мудростью|скажи мудрость|дай мудрость)': lambda u, c: self.wisdom(u, c)
+            r'(^|\s)(ответь|спроси|deepseek|ask)': self.ask_deepseek,
+            r'(^|\s)(ответь на вопрос|что думаешь)': self.ask_deepseek
+            
         }
 
     async def wisdom(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -75,7 +80,7 @@ class Handlers:
     
     
     async def wisdom(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Обработчик запросов мудростей"""
+
         try:
             if not self.wisdom_quotes:
                 await update.message.reply_text("База мудростей пока пуста 😢")
@@ -125,7 +130,7 @@ class Handlers:
             await update.message.reply_text("Не смог обработать запрос")
 
     async def weather(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Обработчик запросов погоды"""
+        
         try:
             user_text = update.message.text.lower()
             match = re.search(r'погод[а-я]*\s*(?:в|по)?\s*([а-яё]+)', user_text)
@@ -167,7 +172,7 @@ class Handlers:
             await update.message.reply_text("Произошла ошибка при запросе погоды. Попробуй позже.")
 
     async def joke(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Обработчик запросов шуток"""
+        
         try:
             url = "http://rzhunemogu.ru/RandJSON.aspx?CType=1"  
             response = requests.get(url, timeout=5)
@@ -311,6 +316,37 @@ class Handlers:
         except Exception as e:
             logger.error(f"Ошибка при получении цитаты: {e}")
             await update.message.reply_text("⚠️ Ошибка при получении цитаты")
+            
+            
+    async def ask_deepseek(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Обработчик запросов к DeepSeek"""
+        try:
+            user_text = update.message.text
+            
+            headers = {
+                "Authorization": f"Bearer {self.deepseek_api_key}",
+                "Content-Type": "application/json"
+            }
+            
+            payload = {
+                "model": "deepseek-chat",
+                "messages": [{"role": "user", "content": user_text}],
+                "temperature": 0.7,
+                "max_tokens": 1000
+            }
+            
+            response = requests.post(
+                self.deepseek_api_url,
+                headers=headers,
+                json=payload
+            ).json()
+            
+            answer = response["choices"][0]["message"]["content"]
+            await update.message.reply_text(answer)
+            
+        except Exception as e:
+            logger.error(f"DeepSeek API error: {e}")
+            await update.message.reply_text("Не удалось получить ответ. Попробуйте позже.")
             
             
             
