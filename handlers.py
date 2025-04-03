@@ -297,7 +297,7 @@ async def ask_deepseek(self, update: Update, context: ContextTypes.DEFAULT_TYPE)
             
             
     async def add_quote_from_reply(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-  
+    
         if not self.db:
             await update.message.reply_text("❌ Система цитат недоступна")
             return
@@ -308,16 +308,17 @@ async def ask_deepseek(self, update: Update, context: ContextTypes.DEFAULT_TYPE)
         
         original = update.message.reply_to_message
         user = update.message.from_user
-    
+
         if not original.text:
             await update.message.reply_text("⚠️ Можно сохранять только текстовые сообщения")
             return
         
         text = original.text.strip()
-        
+    
         if len(text) > 500:
             await update.message.reply_text("⚠️ Слишком длинная цитата (максимум 500 символов)")
             return
+        
         if len(text) < 5:
             await update.message.reply_text("⚠️ Цитата слишком короткая")
             return

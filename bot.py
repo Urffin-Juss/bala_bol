@@ -25,7 +25,7 @@ class Bot:
         self.app.add_handler(
             MessageHandler(
                 filters.TEXT & filters.REPLY & filters.Regex(r'^цтт$'),
-                self.handlers._add_quote_from_reply
+                self.handlers.add_quote_from_reply
             )
         )
         
@@ -61,8 +61,13 @@ class Bot:
 
 if __name__ == "__main__":
     token = os.getenv("TELEGRAM_BOT_TOKEN")
+    print(f"Токен: {'ЕСТЬ' if token else 'ОТСУТСТВУЕТ'}")  # Отладочный вывод
     if not token:
-        print("Не задан токен бота!")
+        print("Токен бота не найден в переменных окружения!")
         exit(1)
         
-    Bot(token).run()
+    try:
+        Bot(token).run()
+    except Exception as e:
+        print(f"Ошибка запуска бота: {str(e)}")
+        raise
