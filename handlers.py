@@ -197,6 +197,8 @@ class Handlers:
                 "- 'Лёва, какая погода в Москве'",
                 "- 'Лёва, разыграй звания'",
                 "- 'Лёва, что ты умеешь?'"
+                "- 'Лёва, скажи мудрость'"
+                "- 'Лева, вспомни цитату'"
             ]
             await update.message.reply_text("\n".join(commands))
         except Exception as e:
@@ -338,7 +340,7 @@ class Handlers:
                 return
 
             data = response.json()
-            logger.debug(f"Ответ API: {data}")  # Логируем ответ для отладки
+            logger.debug(f"Ответ API: {data}")
 
             answer = data.get("choices", [{}])[0].get("message", {}).get("content", "Не удалось получить ответ")
             await update.message.reply_text(answer)
