@@ -52,9 +52,9 @@ class Handlers:
         }
 
 async def ask_deepseek(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Обработчик запросов к DeepSeek"""
+    
     try:
-        # Извлекаем текст без команды-триггера
+       
         user_text = re.sub(
             r'(ответь|спроси|deepseek|ask)', 
             '', 
@@ -83,7 +83,7 @@ async def ask_deepseek(self, update: Update, context: ContextTypes.DEFAULT_TYPE)
             "max_tokens": 1000
         }
         
-        # Делаем запрос с таймаутом
+       
         response = requests.post(
             self.deepseek_api_url,
             headers=headers,
@@ -91,7 +91,7 @@ async def ask_deepseek(self, update: Update, context: ContextTypes.DEFAULT_TYPE)
             timeout=15
         )
         
-        # Проверяем статус ответа
+        
         if response.status_code != 200:
             error_msg = f"API error {response.status_code}: {response.text}"
             logger.error(error_msg)
@@ -100,9 +100,9 @@ async def ask_deepseek(self, update: Update, context: ContextTypes.DEFAULT_TYPE)
             
         answer = response.json()["choices"][0]["message"]["content"]
         
-        # Очищаем ответ
+        
         clean_answer = answer.split("Ответ:")[-1].strip()
-        clean_answer = clean_answer[:2000]  # Обрезаем слишком длинные ответы
+        clean_answer = clean_answer[:2000]  
         
         await update.message.reply_text(f"🤖 DeepSeek отвечает:\n\n{clean_answer}")
         
@@ -296,7 +296,7 @@ async def ask_deepseek(self, update: Update, context: ContextTypes.DEFAULT_TYPE)
             
             
             
-    async def _add_quote_from_reply(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+    async def add_quote_from_reply(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
   
         if not self.db:
             await update.message.reply_text("❌ Система цитат недоступна")
