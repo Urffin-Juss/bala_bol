@@ -46,36 +46,69 @@ class Handlers:
             r'(^|\s)(старт|начать|привет|hello)': lambda u, c: self.start_handler(u, c),
             r'(^|\s)(цтт)': lambda u, c: self.handle_quote_command(u, c),
             r'(?i)(^|\s)(мудрость|мудростью|скажи мудрость|дай мудрость)': lambda u, c: self.wisdom(u, c),
-            r'(^|\s)(ответь|спроси|deepseek|ask)': self.ask_deepseek
+            r'(^|\s)(ответь|спроси|deepseek|ask)': lambda u, c: self.ask_deepseek(u, c)
         
             
         }
 
-    async def wisdom(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Обработчик запросов мудростей"""
-        try:
-            if not self.wisdom_quotes:
-                await update.message.reply_text("База мудростей пока пуста 😢")
-                return
-            
-            quote = random.choice(self.wisdom_quotes)
-            response = f"«{quote['text']}»\n\n— {quote['author']}"
-            await update.message.reply_text(response)
-            
-        except Exception as e:
-            logger.error(f"Ошибка в wisdom: {e}")
-            await update.message.reply_text("Произошла ошибка при поиске мудрости. Попробуй позже.")
+async def ask_deepseek(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Обработчик запросов к DeepSeek"""
+    try:
+        # Извлекаем текст без команды-триггера
+        user_text = re.sub(
+            r'(ответь|спроси|deepseek|ask)', 
+            '', 
+            update.message.text, 
+            flags=re.IGNORECASE
+        ).strip()
         
-    def is_message_for_bot(self, text: str) -> bool:
-    
-        if not text:
-            return False
+        if not user_text:
+            await update.message.reply_text("Напишите вопрос после команды, например:\n'Лёва, ответь: как работает ИИ?'")
+            return
+
+        if not self.deepseek_api_key:
+            await update.message.reply_text("API не настроен")
+            logger.error("DeepSeek API key missing!")
+            return
+
+        headers = {
+            "Authorization": f"Bearer {self.deepseek_api_key}",
+            "Content-Type": "application/json"
+        }
+        
+        payload = {
+            "model": "deepseek-chat",
+            "messages": [{"role": "user", "content": user_text}],
+            "temperature": 0.7,
+            "max_tokens": 1000
+        }
+        
+        # Делаем запрос с таймаутом
+        response = requests.post(
+            self.deepseek_api_url,
+            headers=headers,
+            json=payload,
+            timeout=15
+        )
+        
+        # Проверяем статус ответа
+        if response.status_code != 200:
+            error_msg = f"API error {response.status_code}: {response.text}"
+            logger.error(error_msg)
+            await update.message.reply_text("Ошибка при запросе к API")
+            return
             
-        first_word = text.split()[0].lower()
-        if first_word in self.bot_names:
-            return True
-            
-        return any(name in text.lower() for name in self.bot_names)
+        answer = response.json()["choices"][0]["message"]["content"]
+        
+        # Очищаем ответ
+        clean_answer = answer.split("Ответ:")[-1].strip()
+        clean_answer = clean_answer[:2000]  # Обрезаем слишком длинные ответы
+        
+        await update.message.reply_text(f"🤖 DeepSeek отвечает:\n\n{clean_answer}")
+        
+    except Exception as e:
+        logger.error(f"DeepSeek error: {str(e)}")
+        await update.message.reply_text("⚠️ Ошибка при обработке запроса")
     
     
     
@@ -318,50 +351,6 @@ class Handlers:
             await update.message.reply_text("⚠️ Ошибка при получении цитаты")
             
             
-    async def ask_deepseek(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Обработчик запросов к DeepSeek"""
-        try:
-            user_text = update.message.text
-            
-            headers = {
-                "Authorization": f"Bearer {self.deepseek_api_key}",
-                "Content-Type": "application/json"
-            }
-            
-            payload = {
-                "model": "deepseek-chat",
-                "messages": [{"role": "user", "content": user_text}],
-                "temperature": 0.7,
-                "max_tokens": 1000
-            }
-            
-            response = requests.post(
-                self.deepseek_api_url,
-                headers=headers,
-                json=payload,
-                timeout=10
-            )    
-            
-            if response.status_code != 200:
-                raise Exception(f"API error: {response.text}")  
-                
-            answer = response.json()["choices"][0]["message"]["content"]     
-            
-            clean_answer = answer.split("\n")[0]  # Берем первую строку для краткости
-            await update.message.reply_text(f"🔍 DeepSeek отвечает:\n\n{clean_answer}") 
-            
-            response = requests.post(
-                self.deepseek_api_url,
-                headers=headers,
-                json=payload
-            ).json()
-            
-            answer = response["choices"][0]["message"]["content"]
-            await update.message.reply_text(answer)
-            
-        except Exception as e:
-            logger.error(f"DeepSeek API error: {e}")
-            await update.message.reply_text("Не удалось получить ответ. Попробуйте позже.")
             
             
             
