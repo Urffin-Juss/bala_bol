@@ -61,7 +61,7 @@ class Bot:
 
 if __name__ == "__main__":
     token = os.getenv("TELEGRAM_BOT_TOKEN")
-    print(f"Токен: {'ЕСТЬ' if token else 'ОТСУТСТВУЕТ'}")  # Отладочный вывод
+    print(f"Токен: {'ЕСТЬ' if token else 'ОТСУТСТВУЕТ'}")  
     if not token:
         print("Токен бота не найден в переменных окружения!")
         exit(1)
