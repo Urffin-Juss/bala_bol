@@ -1,4 +1,4 @@
-from telegram import Update
+from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
 from telegram.ext import ContextTypes
 import logging
 from dotenv import load_dotenv
@@ -8,18 +8,20 @@ import random
 from datetime import datetime, timedelta
 import re
 from pathlib import Path
+from openai import OpenAI
 
 load_dotenv()
 logger = logging.getLogger(__name__)
 
+
 class Handlers:
     def __init__(self, db=None):
-        self.deepseek_api_key = os.getenv("DEEPSEEK_API_KEY")  
-        self.deepseek_api_url = "https://api.deepseek.com/v1/chat/completions"      
+        self.deepseek_api_key = os.getenv("DEEPSEEK_API_KEY")
+        self.deepseek_api_url = "https://api.deepseek.com/v1/chat/completions"
         self.bot_names = ["бот", "лёва", "лимонадный", "дружище", "лева", "лев"]
         self.db = db
         self.wisdom_quotes = []
-        
+
         try:
             current_dir = Path(__file__).parent
             quotes_file = current_dir / "data" / "wisdom_quotes.txt"
@@ -35,10 +37,10 @@ class Handlers:
         except Exception as e:
             logger.error(f"Ошибка загрузки цитат: {e}")
             self.wisdom_quotes = []
-            
+
         self.command_patterns = {
             r'(^|\s)(шутк|анекдот|пошути|рассмеши)': lambda u, c: self.joke(u, c),
-            r'(^|\s)(расскажи|дай|хочу|го)\s*(шутку|анекдот)': lambda u, c: self.joke(u, c),            
+            r'(^|\s)(расскажи|дай|хочу|го)\s*(шутку|анекдот)': lambda u, c: self.joke(u, c),
             r'(^|\s)(какая|узнать|скажи)\s*(погода|погоду)\s*(в|по)?\s*([а-яё]+)': lambda u, c: self.weather(u, c),
             r'(^|\s)(погода|погоду)\s*(в|по)?\s*([а-яё]+)': lambda u, c: self.weather(u, c),
             r'(^|\s)(команды|что умеешь|помощь|help)': lambda u, c: self.info(u, c),
@@ -79,44 +81,74 @@ class Handlers:
     
     
     
+            r'(^|\s)(ответь|спроси|deepseek|ask)': lambda u, c: self.ask_deepseek(u, c),
+            r'(^|\s)(ответь на вопрос|что думаешь)': lambda u, c: self.ask_deepseek(u, c)
+
+        }
+
     async def wisdom(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         try:
             if not self.wisdom_quotes:
                 await update.message.reply_text("База мудростей пока пуста 😢")
                 return
-            
+
             quote = random.choice(self.wisdom_quotes)
             response = f"«{quote['text']}»\n\n— {quote['author']}"
             await update.message.reply_text(response)
-            
+
+        except Exception as e:
+            logger.error(f"Ошибка в wisdom: {e}")
+            await update.message.reply_text("Произошла ошибка при поиске мудрости. Попробуй позже.")
+
+    def is_message_for_bot(self, text: str) -> bool:
+
+        if not text:
+            return False
+
+        first_word = text.split()[0].lower()
+        if first_word in self.bot_names:
+            return True
+
+        return any(name in text.lower() for name in self.bot_names)
+
+    async def wisdom(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+
+        try:
+            if not self.wisdom_quotes:
+                await update.message.reply_text("База мудростей пока пуста 😢")
+                return
+
+            quote = random.choice(self.wisdom_quotes)
+            response = f"«{quote['text']}»\n\n— {quote['author']}"
+            await update.message.reply_text(response)
+
         except Exception as e:
             logger.error(f"Ошибка в wisdom: {e}")
             await update.message.reply_text("Произошла ошибка при поиске мудрости. Попробуй позже.")
 
     async def process_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-    
+
         if update.message.reply_to_message and update.message.text.lower().strip() == "цтт":
             await self._add_quote_from_reply(update, context)
             return
-        
+
         user_text = update.message.text.lower() if update.message.text else ""
-    
+
         if not self.is_message_for_bot(user_text):
             return
 
         cleaned_text = re.sub(r'^\s*(бот|лёва|лева|дружище)[,\.!]*\s*', '', user_text)
-    
-    
+
         for pattern, handler in self.command_patterns.items():
             if re.search(pattern, cleaned_text):
-                await handler(update, context)  
+                await handler(update, context)
                 return
-            
+
         await self.handle_text(update, context)
 
     async def start_handler(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        
+
         try:
             await update.message.reply_text(
                 f"Привет! Я бот Лёва. Можешь попросить меня:\n"
@@ -130,14 +162,15 @@ class Handlers:
             await update.message.reply_text("Не смог обработать запрос")
 
     async def weather(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        
+
         try:
             user_text = update.message.text.lower()
             match = re.search(r'погод[а-я]*\s*(?:в|по)?\s*([а-яё]+)', user_text)
             city = match.group(1) if match else None
-            
+
             if not city:
-                await update.message.reply_text("Напиши например: 'Лева, какая погода в Москве?' или 'Лева, погода в Питере'")
+                await update.message.reply_text(
+                    "Напиши например: 'Лева, какая погода в Москве?' или 'Лева, погода в Питере'")
                 return
 
             api_key = os.getenv('OPENWEATHER_API_KEY')
@@ -172,15 +205,15 @@ class Handlers:
             await update.message.reply_text("Произошла ошибка при запросе погоды. Попробуй позже.")
 
     async def joke(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        
+
         try:
-            url = "http://rzhunemogu.ru/RandJSON.aspx?CType=1"  
+            url = "http://rzhunemogu.ru/RandJSON.aspx?CType=1"
             response = requests.get(url, timeout=5)
-            
+
             if response.status_code != 200:
                 await update.message.reply_text("Не удалось получить шутку. Попробуй позже.")
                 return
-        
+
             joke_text = response.text.replace('{"content":"', '').replace('"}', '')
             await update.message.reply_text(joke_text)
             pass
@@ -189,7 +222,7 @@ class Handlers:
             await update.message.reply_text("Произошла ошибка при получении шутки. Попробуй позже.")
 
     async def info(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        
+
         try:
             commands = [
                 "Как общаться со мной:",
@@ -199,33 +232,36 @@ class Handlers:
                 "- 'Лёва, что ты умеешь?'",
                 "- 'Лёва, скажи мудрость'",
                 "- 'Лева, вспомни цитату'"
+                "- 'Лёва, что ты умеешь?'"
+                "- 'Лёва, скажи мудрость'"
+                "- 'Лева, вспомни цитату'"
             ]
             await update.message.reply_text("\n".join(commands))
         except Exception as e:
             logger.error(f"Ошибка в info: {e}")
             await update.message.reply_text("Произошла ошибка. Попробуй позже.")
-    
+
     async def assign_titles(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        
+
         try:
             chat_id = update.message.chat.id
             last_called = context.chat_data.get('last_called')
-            
+
             if last_called and datetime.now() - last_called < timedelta(hours=24):
                 await update.message.reply_text("Только один раз в сутки, котик")
                 return
-            
+
             admins = await context.bot.get_chat_administrators(chat_id)
             human_members = [admin.user for admin in admins if not admin.user.is_bot]
 
             if len(human_members) < 2:
                 await update.message.reply_text("Нужно как минимум два участника!")
                 return
-            
+
             chosen_members = random.sample(human_members, 2)
             title_x = chosen_members[0]
             title_y = chosen_members[1]
-            
+
             result_message = (
                 f"🎉 Сегодняшние звания:\n"
                 f"🏆 Кисо чата: {title_x.mention_html()}\n"
@@ -239,12 +275,12 @@ class Handlers:
         except Exception as e:
             logger.error(f"Ошибка в assign_titles: {e}")
             await update.message.reply_text("Произошла ошибка. Попробуй позже.")
-            
+
     async def handle_text(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-   
+
         if not update.message or not update.message.text:
             return
-        
+
         user_text = update.message.text.lower()
         greetings = ["Привет-привет! 😃", "Здорово, что заглянул! 👍", "Йоу! Чё как? 😎"]
         farewells = ["Пока-пока! 🖐️", "Уже уходишь? Ну ладно... 😢", "До скорого! 🥺"]
@@ -260,38 +296,36 @@ class Handlers:
                 "Честно говоря, я не понял... 🤔",
                 "Можешь перефразировать? 🧐",
                 "Попробуй сказать 'Лёва, что ты умеешь?'"
-        ]
+            ]
             await update.message.reply_text(random.choice(neutral_answers))
-            
-            
-            
+
     async def add_quote_from_reply(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-    
+
         if not self.db:
             await update.message.reply_text("❌ Система цитат недоступна")
             return
-        
+
         if not update.message.reply_to_message:
             await update.message.reply_text("⚠️ Это не ответ на сообщение")
             return
-        
+
         original = update.message.reply_to_message
         user = update.message.from_user
 
         if not original.text:
             await update.message.reply_text("⚠️ Можно сохранять только текстовые сообщения")
             return
-        
+
         text = original.text.strip()
-    
+
         if len(text) > 500:
             await update.message.reply_text("⚠️ Слишком длинная цитата (максимум 500 символов)")
             return
-        
+
         if len(text) < 5:
             await update.message.reply_text("⚠️ Цитата слишком короткая")
             return
-        
+
         try:
             if self.db.add_quote(user.id, user.full_name, text):
                 username = f"@{user.username}" if user.username else user.full_name
@@ -304,11 +338,11 @@ class Handlers:
             await update.message.reply_text("⚠️ Произошла ошибка при сохранении")
 
     async def handle_quote_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-    
+
         if not self.db:
             await update.message.reply_text("❌ Система цитат недоступна")
             return
-        
+
         try:
             quote = self.db.get_random_quote()
             if quote and 'text' in quote and 'user_name' in quote:
@@ -355,15 +389,47 @@ class Handlers:
             
             
             
+
+    async def ask_deepseek(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        try:
+            headers = {
+                "Authorization": f"Bearer {self.deepseek_api_key}",
+                "Content-Type": "application/json"
+            }
+
+            payload = {
+                "model": "deepseek-chat",
+                "messages": [{"role": "user", "content": update.message.text}],
+                "temperature": 0.7,
+                "max_tokens": 1000
+            }
+
+            response = requests.post(self.deepseek_api_url, headers=headers, json=payload)
+
+            if response.status_code != 200:
+                logger.error(f"Ошибка API: {response.status_code} {response.text}")
+                await update.message.reply_text("⚠️ Ошибка API. Попробуйте позже.")
+                return
+
+            data = response.json()
+            logger.debug(f"Ответ API: {data}")
+
+            answer = data.get("choices", [{}])[0].get("message", {}).get("content", "Не удалось получить ответ")
+            await update.message.reply_text(answer)
+
+        except Exception as e:
+            logger.error(f"DeepSeek API error: {e}", exc_info=True)
+            await update.message.reply_text("⚠️ Ошибка. Попробуйте позже.")
+
     # Временный дебагхантер
-    
+
     async def handle_quote_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-    
-        self.db.debug_quotes()  
-    
+
+        self.db.debug_quotes()
+
         quote = self.db.get_random_quote()
-        print(f"DEBUG: Полученная цитата: {quote}")  
-    
+        print(f"DEBUG: Полученная цитата: {quote}")
+
         if quote:
             await update.message.reply_text(f"Цитата #{quote['id']}:\n{quote['text']}")
         else:
