@@ -1,4 +1,4 @@
-from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
+from telegram import Update
 from telegram.ext import ContextTypes
 import logging
 from dotenv import load_dotenv
@@ -8,19 +8,44 @@ import random
 from datetime import datetime, timedelta
 import re
 from pathlib import Path
-from openai import OpenAI
+from models import QuoteDB, Feedback
+from typing import Optional, Dict, Any
 
 load_dotenv()
 logger = logging.getLogger(__name__)
 
 
 class Handlers:
-    def __init__(self, db=None):
+    def __init__(self, db: QuoteDB, feedback: Feedback):
+        """Инициализация обработчиков команд"""
         self.deepseek_api_key = os.getenv("DEEPSEEK_API_KEY")
         self.deepseek_api_url = "https://api.deepseek.com/v1/chat/completions"
         self.bot_names = ["бот", "лёва", "лимонадный", "дружище", "лева", "лев"]
         self.db = db
+        self.feedback = feedback
         self.wisdom_quotes = []
+
+        # Загрузка цитат мудрости
+        self._load_wisdom_quotes()
+
+        # Паттерны команд
+        self.command_patterns = {
+            r'(^|\s)(шутк[ауи]|анекдот|пошути|рассмеши|прикол)': self.joke,
+            r'(^|\s)(расскажи|дай|хочу|го)\s*(шутку|анекдот|прикол)': self.joke,
+            r'(^|\s)(какая|узнать|скажи|покажи)\s*(погода|погоду)\s*(в|по)?\s*([а-яё]{3,})': self.weather,
+            r'(^|\s)(погода|погоду)\s*(в|по)?\s*([а-яё]{3,})': self.weather,
+            r'(^|\s)(команды|что\s+умеешь|помощь|help|справка)': self.info,
+            r'(^|\s)(звания|розыгрыш|титулы|ранги)': self.assign_titles,
+            r'(^|\s)(старт|начать|привет|hello|hi|здравствуй)': self.start_handler,
+            r'(^|\s)(цтт|цитат[ауы]|запомни)': self.handle_quote_command,
+            r'(^|\s)(мудрост[ьи]|скажи\s+мудрость|дай\s+мудрость|совет)': self.wisdom,
+            r'(^|\s)(ответь|спроси|deepseek|ask|скажи|что\s+думаешь)': self.ask_deepseek,
+            r'(^|\s)(ответь\s+на\s+вопрос|объясни|расскажи\s+подробнее)': self.ask_deepseek,
+            r'(^|\s)(обратн[аую]|фидбек|отзыв|сообщи\s+об\s+ошибке|багрепорт)': self._handle_feedback,
+            r'(^|\s)(предлож[иь]|иде[яю])': self._handle_feedback
+        }
+
+    def _load_wisdom_quotes(self):
 
         try:
             current_dir = Path(__file__).parent
@@ -38,73 +63,56 @@ class Handlers:
             logger.error(f"Ошибка загрузки цитат: {e}")
             self.wisdom_quotes = []
 
-        self.command_patterns = {
-            # Шутки
-            r'(^|\s)(шутк[ауи]|анекдот|пошути|рассмеши|прикол)': self.joke,
-            r'(^|\s)(расскажи|дай|хочу|го)\s*(шутку|анекдот|прикол)': self.joke,
-    
-            # Погода
-            r'(^|\s)(какая|узнать|скажи|покажи)\s*(погода|погоду)\s*(в|по)?\s*([а-яё]{3,})': self.weather,
-            r'(^|\s)(погода|погоду)\s*(в|по)?\s*([а-яё]{3,})': self.weather,
-    
-            # Информация
-            r'(^|\s)(команды|что\s+умеешь|помощь|help|справка)': self.info,
-    
-            # Звания/титулы
-            r'(^|\s)(звания|розыгрыш|титулы|ранги)': self.assign_titles,
-    
-            # Приветствие
-            r'(^|\s)(старт|начать|привет|hello|hi|здравствуй)': self.start_handler,
-    
-            # Цитаты
-            r'(^|\s)(цтт|цитат[ауы]|запомни)': self.handle_quote_command,
-    
-            # Мудрость
-            r'(^|\s)(мудрост[ьи]|скажи\s+мудрость|дай\s+мудрость|совет)': self.wisdom,
-    
-            # DeepSeek
-            r'(^|\s)(ответь|спроси|deepseek|ask|скажи|что\s+думаешь)': self.ask_deepseek,
-            r'(^|\s)(ответь\s+на\s+вопрос|объясни|расскажи\s+подробнее)': self.ask_deepseek,
-    
-            # Обратная связь (новое)
-            r'(^|\s)(обратн[аую]|фидбек|отзыв|сообщи\s+об\s+ошибке|багрепорт)': self.handle_feedback,
-            r'(^|\s)(предлож[иь]|иде[яю])': self.handle_feedback
-    }
-        
+    async def _handle_feedback(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
 
-    async def handle_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Основной обработчик входящих текстовых сообщений"""
+        await self.feedback.handle_feedback(update, context)
+
+    def is_message_for_bot(self, text: str) -> bool:
+
+        text_lower = text.lower()
+        return any(name in text_lower for name in self.bot_names)
+
+    async def process_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+
         try:
-            text = update.message.text.lower()
-            logger.debug(f"Получено сообщение: {text}")
+            if not update.message or not update.message.text:
+                return
 
-            # Проверка на прямое обращение к боту
-            direct_address = any(name in text for name in self.bot_names)
-            
+            text = update.message.text.lower()
+            is_direct_address = self.is_message_for_bot(text)
+
+
+            if update.message.reply_to_message and text.strip() == "цтт":
+                await self.add_quote_from_reply(update, context)
+                return
+
+
             for pattern, handler in self.command_patterns.items():
                 match = re.search(pattern, text)
                 if match:
-                    # Если команда требует прямого обращения, но его нет - пропускаем
-                    if pattern in [r'ответь', r'объясни'] and not direct_address:
+
+                    if pattern in [r'ответь', r'объясни', r'что думаешь'] and not is_direct_address:
                         continue
-                        
+
                     logger.info(f"Сработал паттерн: {pattern}")
-                    await handler(update, context, *match.groups())
+
+
+                    if handler == self.weather:
+                        city = match.group(match.lastindex) if match.lastindex else None
+                        await handler(update, context, city)
+                    else:
+                        await handler(update, context)
                     return
 
-            # Если сообщение начинается с имени бота, но команда не распознана
-            if direct_address:
-                await update.message.reply_text("Не понимаю команду. Напиши 'помощь' для списка команд")
-            else:
-                # Можно добавить обработку общего диалога
-                pass
+
+            if is_direct_address:
+                await self.handle_text(update, context)
 
         except Exception as e:
             logger.error(f"Ошибка обработки сообщения: {e}", exc_info=True)
             await update.message.reply_text("⚠️ Произошла ошибка при обработке запроса")
-    
 
-    
+
 
     async def wisdom(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
 
@@ -121,50 +129,112 @@ class Handlers:
             logger.error(f"Ошибка в wisdom: {e}")
             await update.message.reply_text("Произошла ошибка при поиске мудрости. Попробуй позже.")
 
-    async def process_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+    async def start_handler(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
 
-        if update.message.reply_to_message and update.message.text.lower().strip() == "цтт":
-            await self._add_quote_from_reply(update, context)
-            return
+        try:
+            await update.message.reply_text(
+                "Привет! Я бот Лёва. Вот что я умею:\n"
+                "- Рассказывать шутки и анекдоты\n"
+                "- Показывать погоду в любом городе\n"
+                "- Разыгрывать звания в чате\n"
+                "- Сохранять и показывать цитаты\n"
+                "- Давать мудрые советы\n\n"
+                "- Дать ссылочку на обратную связь\n\n"
+                "Просто напиши что-то вроде 'Лёва, расскажи шутку'"
+            )
+        except Exception as e:
+            logger.error(f"Ошибка в start_handler: {e}")
+            await update.message.reply_text("Не смог обработать запрос")
 
-        user_text = update.message.text.lower() if update.message.text else ""
+    async def weather(self, update: Update, context: ContextTypes.DEFAULT_TYPE, city: Optional[str] = None):
 
-        if not self.is_message_for_bot(user_text):
-            return
+        try:
 
-        cleaned_text = re.sub(r'^\s*(бот|лёва|лева|дружище)[,\.!]*\s*', '', user_text)
+            if city is None:
+                user_text = update.message.text.lower()
+                match = re.search(r'погод[а-я]*\s*(?:в|по)?\s*([а-яё]{3,})', user_text)
+                city = match.group(1) if match else None
 
-        for pattern, handler in self.command_patterns.items():
-            if re.search(pattern, cleaned_text):
-                await handler(update, context)
+            if not city:
+                await update.message.reply_text(
+                    "Укажите город, например: 'Лева, какая погода в Москве?' или 'Лева, погода в Питере'")
                 return
 
-        await self.handle_text(update, context)
+
+            api_key = os.getenv('OPENWEATHER_API_KEY')
+            if not api_key:
+                await update.message.reply_text("Ошибка: не могу получить данные о погоде.")
+                return
+
+            url = f"http://api.openweathermap.org/data/2.5/weather?q={city}&appid={api_key}&units=metric&lang=ru"
+            response = requests.get(url)
+            data = response.json()
+
+            if data.get("cod") != 200:
+                await update.message.reply_text(f"Не удалось получить погоду для города {city}. Проверь название.")
+                return
+
+            weather_description = data['weather'][0]['description']
+            temperature = data['main']['temp']
+            humidity = data['main']['humidity']
+            wind_speed = data['wind']['speed']
+
+            weather_message = (
+                f"Погода в городе {city}:\n"
+                f"Описание: {weather_description}\n"
+                f"Температура: {temperature}°C\n"
+                f"Влажность: {humidity}%\n"
+                f"Скорость ветра: {wind_speed} м/с"
+            )
+            await update.message.reply_text(weather_message)
+
+        except Exception as e:
+            logger.error(f"Ошибка в weather: {e}")
+            await update.message.reply_text("Произошла ошибка при запросе погоды. Попробуй позже.")
+
+    async def wisdom(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+
+        try:
+            if not self.wisdom_quotes:
+                await update.message.reply_text("База мудростей пока пуста 😢")
+                return
+
+            quote = random.choice(self.wisdom_quotes)
+            response = f"«{quote['text']}»\n\n— {quote['author']}"
+            await update.message.reply_text(response)
+
+        except Exception as e:
+            logger.error(f"Ошибка в wisdom: {e}")
+            await update.message.reply_text("Произошла ошибка при поиске мудрости. Попробуй позже.")
 
     async def start_handler(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         try:
             await update.message.reply_text(
-                f"Привет! Я бот Лёва. Можешь попросить меня:\n"
-                f"- Рассказать шутку\n"
-                f"- Сообщить погоду\n"
-                f"- Разыграть звания в чате\n"
-                f"Просто напиши что-то вроде 'Лёва, расскажи шутку'"
+                "Привет! Я бот Лёва. Вот что я умею:\n"
+                "- Рассказывать шутки и анекдоты\n"
+                "- Показывать погоду в любом городе\n"
+                "- Разыгрывать звания в чате\n"
+                "- Сохранять и показывать цитаты\n"
+                "- Давать мудрые советы\n\n"
+                "- Так же я могу дать ссылку на обратную связь\n\n"
+                "Просто напиши что-то вроде 'Лёва, расскажи шутку'"
             )
         except Exception as e:
-            logger.error(f"Start error: {e}")
+            logger.error(f"Ошибка в start_handler: {e}")
             await update.message.reply_text("Не смог обработать запрос")
 
-    async def weather(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+    async def weather(self, update: Update, context: ContextTypes.DEFAULT_TYPE, city: Optional[str] = None):
 
         try:
-            user_text = update.message.text.lower()
-            match = re.search(r'погод[а-я]*\s*(?:в|по)?\s*([а-яё]+)', user_text)
-            city = match.group(1) if match else None
+            if not city:
+                user_text = update.message.text.lower()
+                match = re.search(r'погод[а-я]*\s*(?:в|по)?\s*([а-яё]+)', user_text)
+                city = match.group(1) if match else None
 
             if not city:
                 await update.message.reply_text(
-                    "Напиши например: 'Лева, какая погода в Москве?' или 'Лева, погода в Питере'")
+                    "Укажите город, например: 'Лева, какая погода в Москве?' или 'Лева, погода в Питере'")
                 return
 
             api_key = os.getenv('OPENWEATHER_API_KEY')
@@ -195,8 +265,9 @@ class Handlers:
             await update.message.reply_text(weather_message)
 
         except Exception as e:
-            logger.error(f"Ошибка в погоде: {e}")
+            logger.error(f"Ошибка в weather: {e}")
             await update.message.reply_text("Произошла ошибка при запросе погоды. Попробуй позже.")
+
 
     async def joke(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
 
@@ -347,34 +418,37 @@ class Handlers:
         except Exception as e:
             logger.error(f"Ошибка при получении цитаты: {e}")
             await update.message.reply_text("⚠️ Ошибка при получении цитаты")
-            
-            
+
     async def ask_deepseek(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Обработчик запросов к DeepSeek"""
+
         try:
+            if not self.deepseek_api_key:
+                await update.message.reply_text("Функция временно недоступна")
+                return
+
             user_text = update.message.text
-            
+
             headers = {
                 "Authorization": f"Bearer {self.deepseek_api_key}",
                 "Content-Type": "application/json"
             }
-            
+
             payload = {
                 "model": "deepseek-chat",
                 "messages": [{"role": "user", "content": user_text}],
                 "temperature": 0.7,
                 "max_tokens": 1000
             }
-            
+
             response = requests.post(
                 self.deepseek_api_url,
                 headers=headers,
                 json=payload
             ).json()
-            
+
             answer = response["choices"][0]["message"]["content"]
             await update.message.reply_text(answer)
-            
+
         except Exception as e:
             logger.error(f"DeepSeek API error: {e}")
             await update.message.reply_text("Не удалось получить ответ. Попробуйте позже.")

@@ -1,18 +1,29 @@
-from telegram import Update
-from telegram.ext import Application, MessageHandler, filters, ContextTypes
-from handlers import Handlers
-from database import QuoteDB
 import os
 import logging
+from telegram import Update
+from telegram.ext import (
+    Application,
+    MessageHandler,
+    filters,
+    ContextTypes
+)
+from handlers import Handlers
+from models import QuoteDB, Feedback
 
 logger = logging.getLogger(__name__)
 
-
 class Bot:
-    def __init__(self, token):
+    def __init__(self, token: str):
         self.token = token
-        self.db = QuoteDB()
-        self.handlers = Handlers(self.db)
+        self.db = QuoteDB(db_file="quotes.db")
+
+        self.feedback = Feedback(
+            form_url=os.getenv("FEEDBACK_FORM_URL"),
+            admin_chat_id=int(os.getenv("ADMIN_CHAT_ID")) if os.getenv("ADMIN_CHAT_ID") else None
+        )
+        
+        
+        self.handlers = Handlers(db=self.db, feedback=self.feedback)
 
         self.app = Application.builder() \
             .token(self.token) \
@@ -23,19 +34,24 @@ class Bot:
 
     def _setup_handlers(self):
 
-        self.app.add_handler(
+        handlers = [
+            
             MessageHandler(
                 filters.TEXT & filters.REPLY & filters.Regex(r'^цтт$'),
                 self.handlers.add_quote_from_reply
-            )
-        )
-
-        self.app.add_handler(
+            ),
+            
+            
             MessageHandler(
                 filters.TEXT & ~filters.COMMAND,
                 self.handlers.process_message
-            )
-        )
+            ),
+            
+            # Можно добавить другие обработчики по необходимости
+        ]
+        
+        for handler in handlers:
+            self.app.add_handler(handler)
 
     def _setup_error_handler(self):
 
@@ -50,6 +66,7 @@ class Bot:
     def run(self):
 
         try:
+            logger.info("Starting bot...")
             self.app.run_polling()
         except KeyboardInterrupt:
             logger.info("Bot stopped by user")
@@ -59,14 +76,21 @@ class Bot:
 
 
 if __name__ == "__main__":
-    token = os.getenv("TELEGRAM_BOT_TOKEN")
-    print(f"Токен: {'ЕСТЬ' if token else 'ОТСУТСТВУЕТ'}")  
-    if not token:
-        print("Токен бота не найден в переменных окружения!")
+    
+    required_vars = {
+        "TELEGRAM_BOT_TOKEN": "Токен бота",
+        "FEEDBACK_FORM_URL": "Ссылка на форму обратной связи",
+        "ADMIN_CHAT_ID": "ID чата админа (опционально)"
+    }
+    
+    missing_vars = [name for name in required_vars if not os.getenv(name)]
+    
+    if missing_vars:
+        logger.error(f"Отсутствуют обязательные переменные окружения: {', '.join(missing_vars)}")
         exit(1)
-
+    
     try:
-        Bot(token).run()
+        Bot(os.getenv("TELEGRAM_BOT_TOKEN")).run()
     except Exception as e:
-        print(f"Ошибка запуска бота: {str(e)}")
+        logger.critical(f"Ошибка запуска бота: {e}")
         raise
