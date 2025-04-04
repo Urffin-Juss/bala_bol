@@ -39,22 +39,74 @@ class Handlers:
             self.wisdom_quotes = []
 
         self.command_patterns = {
-            r'(^|\s)(шутк|анекдот|пошути|рассмеши)': lambda u, c: self.joke(u, c),
-            r'(^|\s)(расскажи|дай|хочу|го)\s*(шутку|анекдот)': lambda u, c: self.joke(u, c),
-            r'(^|\s)(какая|узнать|скажи)\s*(погода|погоду)\s*(в|по)?\s*([а-яё]+)': lambda u, c: self.weather(u, c),
-            r'(^|\s)(погода|погоду)\s*(в|по)?\s*([а-яё]+)': lambda u, c: self.weather(u, c),
-            r'(^|\s)(команды|что умеешь|помощь|help)': lambda u, c: self.info(u, c),
-            r'(^|\s)(звания|розыгрыш|титулы)': lambda u, c: self.assign_titles(u, c),
-            r'(^|\s)(старт|начать|привет|hello)': lambda u, c: self.start_handler(u, c),
-            r'(^|\s)(цтт)': lambda u, c: self.handle_quote_command(u, c),
-            r'(?i)(^|\s)(мудрость|мудростью|скажи мудрость|дай мудрость)': lambda u, c: self.wisdom(u, c),
-            r'(^|\s)(ответь|спроси|deepseek|ask)': self.ask_deepseek,
-            r'(^|\s)(ответь на вопрос|что думаешь)': self.ask_deepseek
+            # Шутки
+            r'(^|\s)(шутк[ауи]|анекдот|пошути|рассмеши|прикол)': self.joke,
+            r'(^|\s)(расскажи|дай|хочу|го)\s*(шутку|анекдот|прикол)': self.joke,
+    
+            # Погода
+            r'(^|\s)(какая|узнать|скажи|покажи)\s*(погода|погоду)\s*(в|по)?\s*([а-яё]{3,})': self.weather,
+            r'(^|\s)(погода|погоду)\s*(в|по)?\s*([а-яё]{3,})': self.weather,
+    
+            # Информация
+            r'(^|\s)(команды|что\s+умеешь|помощь|help|справка)': self.info,
+    
+            # Звания/титулы
+            r'(^|\s)(звания|розыгрыш|титулы|ранги)': self.assign_titles,
+    
+            # Приветствие
+            r'(^|\s)(старт|начать|привет|hello|hi|здравствуй)': self.start_handler,
+    
+            # Цитаты
+            r'(^|\s)(цтт|цитат[ауы]|запомни)': self.handle_quote_command,
+    
+            # Мудрость
+            r'(^|\s)(мудрост[ьи]|скажи\s+мудрость|дай\s+мудрость|совет)': self.wisdom,
+    
+            # DeepSeek
+            r'(^|\s)(ответь|спроси|deepseek|ask|скажи|что\s+думаешь)': self.ask_deepseek,
+            r'(^|\s)(ответь\s+на\s+вопрос|объясни|расскажи\s+подробнее)': self.ask_deepseek,
+    
+            # Обратная связь (новое)
+            r'(^|\s)(обратн[аую]|фидбек|отзыв|сообщи\s+об\s+ошибке|багрепорт)': self.handle_feedback,
+            r'(^|\s)(предлож[иь]|иде[яю])': self.handle_feedback
+    }
+        
+        
+        
+        
+    async def handle_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Основной обработчик входящих текстовых сообщений"""
+        try:
+            text = update.message.text.lower()
+            logger.debug(f"Получено сообщение: {text}")
+
+           
+            direct_address = any(name in text for name in self.bot_names)
             
-        }
+            for pattern, handler in self.command_patterns.items():
+                match = re.search(pattern, text)
+                if match:
+                    
+                    if pattern in [r'ответь', r'объясни'] and not direct_address:
+                        continue
+                        
+                    logger.info(f"Сработал паттерн: {pattern}")
+                    await handler(update, context, *match.groups())
+                    return
+
+           
+            if direct_address:
+                await update.message.reply_text("Не понимаю команду. Напиши 'помощь' для списка команд")
+            else:
+                
+                pass
+
+        except Exception as e:
+            logger.error(f"Ошибка обработки сообщения: {e}", exc_info=True)
+            await update.message.reply_text("⚠️ Произошла ошибка при обработке запроса")
 
     async def wisdom(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Обработчик запросов мудростей"""
+        
         try:
             if not self.wisdom_quotes:
                 await update.message.reply_text("База мудростей пока пуста 😢")
@@ -79,12 +131,6 @@ class Handlers:
             
         return any(name in text.lower() for name in self.bot_names)
     
-    
-    
-            r'(^|\s)(ответь|спроси|deepseek|ask)': lambda u, c: self.ask_deepseek(u, c),
-            r'(^|\s)(ответь на вопрос|что думаешь)': lambda u, c: self.ask_deepseek(u, c)
-
-        }
 
     async def wisdom(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
 
@@ -390,36 +436,6 @@ class Handlers:
             
             
 
-    async def ask_deepseek(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        try:
-            headers = {
-                "Authorization": f"Bearer {self.deepseek_api_key}",
-                "Content-Type": "application/json"
-            }
-
-            payload = {
-                "model": "deepseek-chat",
-                "messages": [{"role": "user", "content": update.message.text}],
-                "temperature": 0.7,
-                "max_tokens": 1000
-            }
-
-            response = requests.post(self.deepseek_api_url, headers=headers, json=payload)
-
-            if response.status_code != 200:
-                logger.error(f"Ошибка API: {response.status_code} {response.text}")
-                await update.message.reply_text("⚠️ Ошибка API. Попробуйте позже.")
-                return
-
-            data = response.json()
-            logger.debug(f"Ответ API: {data}")
-
-            answer = data.get("choices", [{}])[0].get("message", {}).get("content", "Не удалось получить ответ")
-            await update.message.reply_text(answer)
-
-        except Exception as e:
-            logger.error(f"DeepSeek API error: {e}", exc_info=True)
-            await update.message.reply_text("⚠️ Ошибка. Попробуйте позже.")
 
     # Временный дебагхантер
 

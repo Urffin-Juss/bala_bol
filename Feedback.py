@@ -36,7 +36,7 @@ class Feedback:
                 'first_name': update.effective_user.first_name or 'Нет имени'
             }
 
-            # Отправляем пользователю ссылку на форму
+            
             await update.message.reply_text(
                 "📝 Помогите сделать меня лучше!",
                 reply_markup=InlineKeyboardMarkup([
@@ -45,10 +45,10 @@ class Feedback:
                 disable_web_page_preview=True
             )
 
-            # Логируем действие
+            
             logger.info(f"Пользователь {user_data['id']} запросил форму обратной связи")
 
-            # Уведомляем админа (если настроен)
+            
             if self.admin_chat_id:
                 await context.bot.send_message(
                     chat_id=self.admin_chat_id,
