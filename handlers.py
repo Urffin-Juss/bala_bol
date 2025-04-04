@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 
 class Handlers:
     def __init__(self, db: QuoteDB, feedback: Feedback):
-        """Инициализация обработчиков команд"""
+
         self.deepseek_api_key = os.getenv("DEEPSEEK_API_KEY")
         self.deepseek_api_url = "https://api.deepseek.com/v1/chat/completions"
         self.bot_names = ["бот", "лёва", "лимонадный", "дружище", "лева", "лев"]
@@ -30,19 +30,36 @@ class Handlers:
 
         # Паттерны команд
         self.command_patterns = {
-            r'(^|\s)(шутк[ауи]|анекдот|пошути|рассмеши|прикол)': self.joke,
-            r'(^|\s)(расскажи|дай|хочу|го)\s*(шутку|анекдот|прикол)': self.joke,
-            r'(^|\s)(какая|узнать|скажи|покажи)\s*(погода|погоду)\s*(в|по)?\s*([а-яё]{3,})': self.weather,
-            r'(^|\s)(погода|погоду)\s*(в|по)?\s*([а-яё]{3,})': self.weather,
-            r'(^|\s)(команды|что\s+умеешь|помощь|help|справка)': self.info,
-            r'(^|\s)(звания|розыгрыш|титулы|ранги)': self.assign_titles,
-            r'(^|\s)(старт|начать|привет|hello|hi|здравствуй)': self.start_handler,
-            r'(^|\s)(цтт|цитат[ауы]|запомни)': self.handle_quote_command,
-            r'(^|\s)(мудрост[ьи]|скажи\s+мудрость|дай\s+мудрость|совет)': self.wisdom,
-            r'(^|\s)(ответь|спроси|deepseek|ask|скажи|что\s+думаешь)': self.ask_deepseek,
-            r'(^|\s)(ответь\s+на\s+вопрос|объясни|расскажи\s+подробнее)': self.ask_deepseek,
-            r'(^|\s)(обратн[аую]|фидбек|отзыв|сообщи\s+об\s+ошибке|багрепорт)': self._handle_feedback,
-            r'(^|\s)(предлож[иь]|иде[яю])': self._handle_feedback
+            # Шутки (теперь требуют точного соответствия)
+            r'шутк[ауи]|анекдот|пошути|рассмеши|прикол$': self.joke,
+            r'расскажи шутку|дай шутку|хочу шутку|го шутку$': self.joke,
+
+            # Погода (точное соответствие)
+            r'какая погода(?: в| по)? [а-яё]{3,}$': self.weather,
+            r'погода(?: в| по)? [а-яё]{3,}$': self.weather,
+
+            # Информация
+            r'команды|что умеешь|помощь|help|справка$': self.info,
+
+            # Звания/титулы
+            r'звания|розыгрыш|титулы|ранги$': self.assign_titles,
+
+            # Приветствие (точное соответствие)
+            r'старт$|начать$|привет$|hello$|hi$|здравствуй$': self.start_handler,
+
+            # Цитаты
+            r'цтт$|цитат[ауы]$|запомни$': self.handle_quote_command,
+
+            # Мудрость
+            r'мудрост[ьи]$|скажи мудрость$|дай мудрость$|совет$': self.wisdom,
+
+            # DeepSeek
+            r'ответь на вопрос (.+)$': self.ask_deepseek,
+            r'(?:ответь|объясни|скажи|что думаешь) (.+)$': self.ask_deepseek,
+
+            # Обратная связь
+            r'обратн[аую]|фидбек|отзыв|сообщи об ошибке|багрепорт$': self._handle_feedback,
+            r'предлож[иь]|иде[яю]$': self._handle_feedback
         }
 
     def _load_wisdom_quotes(self):
@@ -79,34 +96,33 @@ class Handlers:
                 return
 
             text = update.message.text.lower()
-            is_direct_address = self.is_message_for_bot(text)
 
 
-            if update.message.reply_to_message and text.strip() == "цтт":
-                await self.add_quote_from_reply(update, context)
+            is_direct_address = any(
+                re.search(rf'(^|\s){re.escape(name)}[\s,!?.]', text)
+                for name in self.bot_names
+            )
+
+
+            if not is_direct_address:
                 return
 
 
+            cleaned_text = re.sub(
+                rf'^\s*({"|".join(map(re.escape, self.bot_names))})[\s,!?.]*\s*',
+                '',
+                text
+            )
+
+
             for pattern, handler in self.command_patterns.items():
-                match = re.search(pattern, text)
-                if match:
-
-                    if pattern in [r'ответь', r'объясни', r'что думаешь'] and not is_direct_address:
-                        continue
-
-                    logger.info(f"Сработал паттерн: {pattern}")
-
-
-                    if handler == self.weather:
-                        city = match.group(match.lastindex) if match.lastindex else None
-                        await handler(update, context, city)
-                    else:
-                        await handler(update, context)
+                if re.fullmatch(pattern, cleaned_text.strip()):
+                    logger.info(f"Обработка команды: {pattern}")
+                    await handler(update, context)
                     return
 
 
-            if is_direct_address:
-                await self.handle_text(update, context)
+            await update.message.reply_text("Не понимаю команду. Напиши 'помощь' для списка команд")
 
         except Exception as e:
             logger.error(f"Ошибка обработки сообщения: {e}", exc_info=True)
@@ -422,36 +438,107 @@ class Handlers:
     async def ask_deepseek(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         try:
-            if not self.deepseek_api_key:
-                await update.message.reply_text("Функция временно недоступна")
+
+            if not self.is_message_for_bot(update.message.text):
                 return
 
-            user_text = update.message.text
+            if not self.deepseek_api_key:
+                await update.message.reply_text("🔴 Сервис временно недоступен")
+                return
+
+            query = self._extract_query(update.message.text)
+            if len(query) < 4:
+                await update.message.reply_text("📝 Пожалуйста, задайте более конкретный вопрос (минимум 4 символа)")
+                return
 
             headers = {
                 "Authorization": f"Bearer {self.deepseek_api_key}",
-                "Content-Type": "application/json"
+                "Content-Type": "application/json",
+                "Accept-Encoding": "gzip"
             }
 
             payload = {
                 "model": "deepseek-chat",
-                "messages": [{"role": "user", "content": user_text}],
+                "messages": [{"role": "user", "content": query}],
                 "temperature": 0.7,
-                "max_tokens": 1000
+                "max_tokens": 2000,
+                "stream": False
             }
 
-            response = requests.post(
-                self.deepseek_api_url,
-                headers=headers,
-                json=payload
-            ).json()
 
-            answer = response["choices"][0]["message"]["content"]
-            await update.message.reply_text(answer)
+            max_retries = 3
+            timeout_seconds = 20
+            last_error = None
+
+            for attempt in range(max_retries):
+                try:
+                    response = requests.post(
+                        self.deepseek_api_url,
+                        headers=headers,
+                        json=payload,
+                        timeout=timeout_seconds
+                    )
+
+
+                    if response.status_code == 429:
+                        retry_after = int(response.headers.get('Retry-After', 30))
+                        await update.message.reply_text(
+                            f"🔄 Слишком много запросов. Попробую через {retry_after} сек...")
+                        await asyncio.sleep(retry_after)
+                        continue
+
+                    response.raise_for_status()
+                    data = response.json()
+
+
+                    if not data.get('choices'):
+                        raise ValueError("Неверная структура ответа API")
+
+                    answer = data['choices'][0].get('message', {}).get('content', '').strip()
+                    if not answer:
+                        raise ValueError("Пустой ответ от API")
+
+
+                    await update.message.reply_text(answer[:4000], parse_mode="Markdown")
+                    return
+
+                except requests.exceptions.Timeout:
+                    last_error = f"Таймаут запроса (попытка {attempt + 1}/{max_retries})"
+                    logger.warning(last_error)
+                    if attempt < max_retries - 1:
+                        await asyncio.sleep(2 * (attempt + 1))  # Экспоненциальная задержка
+                    continue
+
+                except requests.exceptions.RequestException as e:
+                    last_error = f"Ошибка сети: {str(e)}"
+                    break
+
+                except ValueError as e:
+                    last_error = f"Ошибка данных: {str(e)}"
+                    break
+
+                except Exception as e:
+                    last_error = f"Неожиданная ошибка: {str(e)}"
+                    break
+
+            # Если все попытки исчерпаны
+            error_message = "🔴 Не удалось получить ответ. " + last_error
+            logger.error(f"DeepSeek API failure: {error_message}")
+            await update.message.reply_text(
+                "😢 Не смог обработать запрос из-за технических проблем. "
+                "Попробуйте задать вопрос позже или переформулируйте его."
+            )
 
         except Exception as e:
-            logger.error(f"DeepSeek API error: {e}")
-            await update.message.reply_text("Не удалось получить ответ. Попробуйте позже.")
+            logger.error(f"Critical error in ask_deepseek: {str(e)}", exc_info=True)
+            await update.message.reply_text("⚠️ Произошла критическая ошибка. Пожалуйста, попробуйте позже.")
+
+    def _extract_query(self, text: str) -> str:
+
+
+        for name in self.bot_names:
+            text = re.sub(rf'^\s*{re.escape(name)}\s*[,!?.]*\s*', '', text, flags=re.IGNORECASE)
+        return text.strip()
             
             
             
