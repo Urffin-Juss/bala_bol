@@ -71,22 +71,20 @@ class Handlers:
             r'(^|\s)(предлож[иь]|иде[яю])': self.handle_feedback
     }
         
-        
-        
-        
+
     async def handle_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Основной обработчик входящих текстовых сообщений"""
         try:
             text = update.message.text.lower()
             logger.debug(f"Получено сообщение: {text}")
 
-           
+            # Проверка на прямое обращение к боту
             direct_address = any(name in text for name in self.bot_names)
             
             for pattern, handler in self.command_patterns.items():
                 match = re.search(pattern, text)
                 if match:
-                    
+                    # Если команда требует прямого обращения, но его нет - пропускаем
                     if pattern in [r'ответь', r'объясни'] and not direct_address:
                         continue
                         
@@ -94,69 +92,19 @@ class Handlers:
                     await handler(update, context, *match.groups())
                     return
 
-           
+            # Если сообщение начинается с имени бота, но команда не распознана
             if direct_address:
                 await update.message.reply_text("Не понимаю команду. Напиши 'помощь' для списка команд")
             else:
-                
+                # Можно добавить обработку общего диалога
                 pass
 
         except Exception as e:
             logger.error(f"Ошибка обработки сообщения: {e}", exc_info=True)
             await update.message.reply_text("⚠️ Произошла ошибка при обработке запроса")
-
-    async def wisdom(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        
-        try:
-            if not self.wisdom_quotes:
-                await update.message.reply_text("База мудростей пока пуста 😢")
-                return
-            
-            quote = random.choice(self.wisdom_quotes)
-            response = f"«{quote['text']}»\n\n— {quote['author']}"
-            await update.message.reply_text(response)
-            
-        except Exception as e:
-            logger.error(f"Ошибка в wisdom: {e}")
-            await update.message.reply_text("Произошла ошибка при поиске мудрости. Попробуй позже.")
-        
-    def is_message_for_bot(self, text: str) -> bool:
-    
-        if not text:
-            return False
-            
-        first_word = text.split()[0].lower()
-        if first_word in self.bot_names:
-            return True
-            
-        return any(name in text.lower() for name in self.bot_names)
     
 
-    async def wisdom(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-
-        try:
-            if not self.wisdom_quotes:
-                await update.message.reply_text("База мудростей пока пуста 😢")
-                return
-
-            quote = random.choice(self.wisdom_quotes)
-            response = f"«{quote['text']}»\n\n— {quote['author']}"
-            await update.message.reply_text(response)
-
-        except Exception as e:
-            logger.error(f"Ошибка в wisdom: {e}")
-            await update.message.reply_text("Произошла ошибка при поиске мудрости. Попробуй позже.")
-
-    def is_message_for_bot(self, text: str) -> bool:
-
-        if not text:
-            return False
-
-        first_word = text.split()[0].lower()
-        if first_word in self.bot_names:
-            return True
-
-        return any(name in text.lower() for name in self.bot_names)
+    
 
     async def wisdom(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
 
