@@ -2,7 +2,11 @@
 <project version="4">
   <component name="ProjectModuleManager">
     <modules>
+<<<<<<< HEAD
       <module fileurl="file://$PROJECT_DIR$/.idea/bot.iml" filepath="$PROJECT_DIR$/.idea/bot.iml" />
+=======
+      <module fileurl="file://$PROJECT_DIR$/.idea/Selftrying.iml" filepath="$PROJECT_DIR$/.idea/Selftrying.iml" />
+>>>>>>> global_update_april_2025
     </modules>
   </component>
 </project>
