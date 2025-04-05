@@ -440,8 +440,8 @@ class Handlers:
 
     async def ask_deepseek(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
 
-        MAX_TIMEOUT = 40  # Тайм-аут запроса
-        MAX_RETRIES = 5  # Количество попыток
+        MAX_TIMEOUT = 40
+        MAX_RETRIES = 5
 
         try:
             if not self.is_message_for_bot(update.message.text):
