@@ -10,6 +10,9 @@ import re
 from pathlib import Path
 from models import QuoteDB, Feedback
 from typing import Optional, Dict, Any
+import asyncio
+
+
 
 load_dotenv()
 logger = logging.getLogger(__name__)
@@ -437,14 +440,18 @@ class Handlers:
 
     async def ask_deepseek(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
 
-        try:
+        MAX_TIMEOUT = 40  # Тайм-аут запроса
+        MAX_RETRIES = 5  # Количество попыток
 
+        try:
             if not self.is_message_for_bot(update.message.text):
                 return
 
             if not self.deepseek_api_key:
                 await update.message.reply_text("🔴 Сервис временно недоступен")
                 return
+
+            logger.debug(f"🔐 Ключ длиной: {len(self.deepseek_api_key)}")
 
             query = self._extract_query(update.message.text)
             if len(query) < 4:
@@ -465,20 +472,14 @@ class Handlers:
                 "stream": False
             }
 
-
-            max_retries = 3
-            timeout_seconds = 20
-            last_error = None
-
-            for attempt in range(max_retries):
+            for attempt in range(MAX_RETRIES):
                 try:
                     response = requests.post(
                         self.deepseek_api_url,
                         headers=headers,
                         json=payload,
-                        timeout=timeout_seconds
+                        timeout=MAX_TIMEOUT  # Тайм-аут запроса
                     )
-
 
                     if response.status_code == 429:
                         retry_after = int(response.headers.get('Retry-After', 30))
@@ -490,7 +491,6 @@ class Handlers:
                     response.raise_for_status()
                     data = response.json()
 
-
                     if not data.get('choices'):
                         raise ValueError("Неверная структура ответа API")
 
@@ -498,31 +498,29 @@ class Handlers:
                     if not answer:
                         raise ValueError("Пустой ответ от API")
 
-
                     await update.message.reply_text(answer[:4000], parse_mode="Markdown")
                     return
 
                 except requests.exceptions.Timeout:
-                    last_error = f"Таймаут запроса (попытка {attempt + 1}/{max_retries})"
-                    logger.warning(last_error)
-                    if attempt < max_retries - 1:
+                    logger.warning(f"Таймаут запроса (попытка {attempt + 1}/{MAX_RETRIES})")
+                    if attempt < MAX_RETRIES - 1:
                         await asyncio.sleep(2 * (attempt + 1))  # Экспоненциальная задержка
                     continue
 
                 except requests.exceptions.RequestException as e:
-                    last_error = f"Ошибка сети: {str(e)}"
+                    logger.error(f"Ошибка сети: {str(e)}")
                     break
 
                 except ValueError as e:
-                    last_error = f"Ошибка данных: {str(e)}"
+                    logger.error(f"Ошибка данных: {str(e)}")
                     break
 
                 except Exception as e:
-                    last_error = f"Неожиданная ошибка: {str(e)}"
+                    logger.error(f"Неожиданная ошибка: {str(e)}")
                     break
 
             # Если все попытки исчерпаны
-            error_message = "🔴 Не удалось получить ответ. " + last_error
+            error_message = "🔴 Не удалось получить ответ. Ошибка сети"
             logger.error(f"DeepSeek API failure: {error_message}")
             await update.message.reply_text(
                 "😢 Не смог обработать запрос из-за технических проблем. "
