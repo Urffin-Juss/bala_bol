@@ -23,7 +23,7 @@ class Handlers:
 
         self.deepseek_api_key = os.getenv("DEEPSEEK_API_KEY")
         self.deepseek_api_url = "https://api.deepseek.com/v1/chat/completions"
-        self.bot_names = ["бот", "лёва", "лимонадный", "дружище", "лева", "лев"]
+        self.bot_names = ["бот", "лев"]
         self.db = db
         self.feedback = feedback
         self.wisdom_quotes = []
@@ -102,7 +102,7 @@ class Handlers:
 
 
             is_direct_address = any(
-                re.search(rf'(^|\s){re.escape(name)}[\s,!?.]', text)
+                re.match(rf'^{re.escape(name)}[\s,!?.]', text)  # ^ означает начало строки
                 for name in self.bot_names
             )
 
@@ -112,8 +112,8 @@ class Handlers:
 
 
             cleaned_text = re.sub(
-                rf'^\s*({"|".join(map(re.escape, self.bot_names))})[\s,!?.]*\s*',
-                '',
+                rf'^({"|".join(map(re.escape, self.bot_names))})[\s,!?.]*\s*',
+                    '',
                 text
             )
 
