@@ -38,7 +38,7 @@ class Handlers:
             r'расскажи шутку|дай шутку|хочу шутку|го шутку$': self.joke,
 
             # Погода (точное соответствие)
-            r'какая погода(?: в| по)? [а-яё]{3,}$': self.weather,
+            r'(?:какая\s+)?погод[а-я]*.*$': self.weather,
             r'погода(?: в| по)? [а-яё]{3,}$': self.weather,
 
             # Информация
@@ -100,9 +100,8 @@ class Handlers:
 
             text = update.message.text.lower()
 
-
             is_direct_address = any(
-                re.match(rf'^{re.escape(name)}[\s,!?.]', text)  # ^ означает начало строки
+                re.match(rf'^{re.escape(name)}[\s,!?.]+', text)  # только в начале сообщения
                 for name in self.bot_names
             )
 
@@ -117,11 +116,19 @@ class Handlers:
                 text
             )
 
+            if re.match(r'^(?:какая\s+)?погод[а-я]*\b', cleaned_text):
+                # передаём ОЧИЩЕННЫЙ текст
+                await self.weather(update, context, cleaned_text=cleaned_text)
+                return
 
             for pattern, handler in self.command_patterns.items():
                 if re.fullmatch(pattern, cleaned_text.strip()):
                     logger.info(f"Обработка команды: {pattern}")
-                    await handler(update, context)
+                    # Если это погода — пробросим очищенный текст
+                    if handler is self.weather:
+                        await handler(update, context, cleaned_text=cleaned_text)
+                    else:
+                        await handler(update, context)
                     return
 
 
@@ -171,8 +178,8 @@ class Handlers:
 
             if city is None:
                 user_text = update.message.text.lower()
-                match = re.search(r'погод[а-я]*\s*(?:в|по)?\s*([а-яё]{3,})', user_text)
-                city = match.group(1) if match else None
+                match = re.search(r'погод[а-я]*\s*(?:в|по)?\s*([\w\- а-яё]{3,})$', user_text)
+                city = match.group(1).strip() if match else None
 
             if not city:
                 await update.message.reply_text(
@@ -243,13 +250,23 @@ class Handlers:
             logger.error(f"Ошибка в start_handler: {e}")
             await update.message.reply_text("Не смог обработать запрос")
 
-    async def weather(self, update: Update, context: ContextTypes.DEFAULT_TYPE, city: Optional[str] = None):
-
+    async def weather(
+            self,
+            update: Update,
+            context: ContextTypes.DEFAULT_TYPE,
+            city: Optional[str] = None,
+            cleaned_text: Optional[str] = None
+    ):
         try:
+            # 1) город
             if not city:
-                user_text = update.message.text.lower()
-                match = re.search(r'погод[а-я]*\s*(?:в|по)?\s*([а-яё]+)', user_text)
-                city = match.group(1) if match else None
+                city = self._extract_city(cleaned_text or "")
+
+            if not city:
+                await update.message.reply_text(
+                    "Укажи город, например: 'Лёва, какая погода в Казани?' или 'Лёва, погода в Нью-Йорке'"
+                )
+                return
 
             if not city:
                 await update.message.reply_text(
@@ -283,8 +300,11 @@ class Handlers:
             )
             await update.message.reply_text(weather_message)
 
+
         except Exception as e:
-            logger.error(f"Ошибка в weather: {e}")
+
+            logger.error(f"Ошибка в weather: {e}", exc_info=True)
+
             await update.message.reply_text("Произошла ошибка при запросе погоды. Попробуй позже.")
 
 
@@ -537,12 +557,33 @@ class Handlers:
         for name in self.bot_names:
             text = re.sub(rf'^\s*{re.escape(name)}\s*[,!?.]*\s*', '', text, flags=re.IGNORECASE)
         return text.strip()
-            
-            
-            
-            
-            
 
+    def _extract_city(self, text: str) -> Optional[str]:
+        """
+        Извлекает город из текста вида:
+        - 'погода волгоград'
+        - 'погода в волгограде'
+        - 'какая погода в нью-йорке'
+        - 'погода по питеру'
+        """
+        text = text.strip().lower()
+
+        # ищем слово 'погода' и всё, что после
+        m = re.search(r'погода(?:\s+[впо])?\s+(.+)', text)
+        if not m:
+            return None
+
+        city = m.group(1).strip()
+
+        # уберём лишние знаки препинания
+        city = re.sub(r'^[,.;:!?«»"\']+|[,.;:!?«»"\']+$', '', city)
+
+        # нормализуем пробелы
+        city = re.sub(r'\s{2,}', ' ', city)
+
+        if len(city) < 3:
+            return None
+        return city
 
     # Временный дебагхантер
 
