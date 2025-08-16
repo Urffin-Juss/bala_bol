@@ -12,6 +12,7 @@ from models import QuoteDB, Feedback, GossipDB
 from typing import Optional, Dict, Any
 import asyncio
 from html import escape
+from meteorf_client import MeteoRFClient, MeteoRFError
 
 
 
@@ -32,6 +33,7 @@ class Handlers:
         self.gossip_db = GossipDB()  # 👈 новое
         self.gossip_window_hours = int(os.getenv("GOSSIP_WINDOW_HOURS", "12"))
         self.gossip_limit = int(os.getenv("GOSSIP_LIMIT", "250"))
+        self.meteorf = MeteoRFClient()
 
         # Загрузка цитат мудрости
         self._load_wisdom_quotes()
@@ -71,6 +73,12 @@ class Handlers:
 
             # Сплетни
             r'сплетн[иья]$|дай сплетни$|что новенького$': self.gossip,
+
+            # Прогноз
+            r'станц(?:ия|ии)?(?: в| по)? [\w\- а-яё]{3,}$': self.station_search,
+            r'прогноз(?: на)? недел[юи]?(?: в| по)? [\w\- а-яё]{3,}$': self.forecast,
+            r'прогноз(?: в| по)? [\w\- а-яё]{3,}$': self.forecast,
+
         }
 
     def _load_wisdom_quotes(self):
@@ -734,3 +742,141 @@ class Handlers:
         except Exception as e:
             logger.error(f"Ошибка в gossip: {e}", exc_info=True)
             await update.message.reply_text("Не вышло собрать сплетни. Попробуй позже.")
+"""
+    async def forecast(self, update, context, city: Optional[str] = None, cleaned_text: Optional[str] = None):
+        try:
+            # текст в двух видах: нижний для матчинга, исходный для извлечения города
+            raw_full = update.message.text or ""
+            # уберём обращение "Лев/Лёва" из оригинала, но БЕЗ .lower()
+            orig_cleaned = re.sub(
+                rf'^\s*({"|".join(map(re.escape, self.bot_names))})[\s,!?.]*\s*',
+                '',
+                raw_full,
+                flags=re.IGNORECASE
+            ).strip()
+
+            lower_cleaned = (cleaned_text or orig_cleaned).lower()
+
+            # weekly?
+            is_weekly = bool(re.search(r'прогноз(?:\s+на)?\s+недел[юи]', lower_cleaned))
+
+            # город вытаскиваем из ОРИГИНАЛА (orig_cleaned), чтобы сохранить регистр
+            if not city:
+                if is_weekly:
+                    m = re.search(r'прогноз(?:\s+на)?\s+недел[юи](?:\s+(?:в|по))?\s+(.+)$', orig_cleaned,
+                                  flags=re.IGNORECASE)
+                else:
+                    m = re.search(r'прогноз(?:\s+(?:в|по))?\s+(.+)$', orig_cleaned, flags=re.IGNORECASE)
+                city = (m.group(1).strip() if m else None)
+
+            if not city:
+                await update.message.reply_text(
+                    "Укажи город: 'Лев прогноз Москва' или 'Лев прогноз на неделю Москва'"
+                )
+                return
+
+
+        except Exception as e:
+
+            logger.error(f"Ошибка в forecast: {e}", exc_info=True)
+
+            await update.message.reply_text("Не удалось получить прогноз. Попробуй позже.")
+
+    async def station_search(self, update, context, cleaned_text: str = None, city: Optional[str] = None):
+        try:
+            raw_full = update.message.text or ""
+            orig_cleaned = re.sub(
+                rf'^\s*({"|".join(map(re.escape, self.bot_names))})[\s,!?.]*\s*',
+                '',
+                raw_full,
+                flags=re.IGNORECASE
+            ).strip()
+
+            if not city:
+                m = re.search(r'станц(?:ия|ии)?(?:\s+(?:в|по))?\s+(.+)$', orig_cleaned, flags=re.IGNORECASE)
+                city = (m.group(1).strip() if m else None)
+
+            if not city:
+                await update.message.reply_text("Пример: 'Лев станции Москва'")
+                return
+
+            stations = self.meteorf.search_stations(city)
+            if not stations:
+                await update.message.reply_text(f"По '{city}' ничего не нашёл.")
+                return
+
+            lines = [f"Найдено станций для «{city}»: (до 10 шт.)"]
+            for s in stations[:10]:
+                nm = s.get("locale_name") or s.get("name") or "—"
+                lines.append(f"• {nm} — код {s['code']}")
+            lines.append("\nМожно запросить: 'Лев прогноз код <код>'")
+            await update.message.reply_text("\n".join(lines))
+
+        except Exception as e:
+            logger.error(f"station_search error: {e}", exc_info=True)
+            await update.message.reply_text("Ошибка при поиске станции.")
+
+    async def forecast_by_code(self, update, context, cleaned_text: str = None):
+        try:
+            text = (cleaned_text or update.message.text or "").lower()
+            m = re.search(r'прогноз код (\d{6,})$', text)
+            if not m:
+                await update.message.reply_text("Пример: 'Лев прогноз код 106747000'")
+                return
+            code = m.group(1)
+
+            raw = self.meteorf.forecast_weekly(code) if "недел" in text else self.meteorf.forecast_daily(code)
+
+            # универсальный разбор дней
+            if isinstance(raw, list):
+                days = raw
+            elif isinstance(raw, dict):
+                for key in ("days", "daily", "items", "list", "forecasts", "data"):
+                    if isinstance(raw.get(key), list):
+                        days = raw[key];
+                        break
+                else:
+                    days = []
+            else:
+                days = []
+
+            def pick(d, *keys, default=None):
+                for k in keys:
+                    if isinstance(d, dict) and d.get(k) is not None:
+                        return d[k]
+                return default
+
+            def fnum(x):
+                try:
+                    return f"{float(x):.1f}"
+                except:
+                    return None
+
+            lines = [f"🗓 Прогноз (код {code}):"]
+            shown = 0
+            for d in days:
+                date = pick(d, "date", "day", "dt", default="")
+                tmin = fnum(pick(d, "t_min", "tMinC", "temp_min", "tmin"))
+                tmax = fnum(pick(d, "t_max", "tMaxC", "temp_max", "tmax"))
+                descr = pick(d, "descr", "text", "condition", "weather", default="")
+                parts = [str(date)]
+                if tmin or tmax:
+                    if tmin and tmax:
+                        parts.append(f"{tmin}…{tmax}°C")
+                    elif tmax:
+                        parts.append(f"до {tmax}°C")
+                    elif tmin:
+                        parts.append(f"от {tmin}°C")
+                if descr: parts.append(descr)
+                line = " — ".join(p for p in parts if p)
+                if line: lines.append(line); shown += 1
+                if shown >= 7: break
+
+            if shown == 0:
+                lines.append("Не получилось распарсить ответ API. Попробуй другой код/город.")
+            await update.message.reply_text("\n".join(lines))
+        except Exception as e:
+            logger.error(f"forecast_by_code error: {e}", exc_info=True)
+            await update.message.reply_text("Ошибка при получении прогноза по коду.")
+"""
+
