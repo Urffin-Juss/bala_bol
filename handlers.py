@@ -727,66 +727,76 @@ class Handlers:
         return link
 
     async def gossip(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Пересказ последних сообщений чата за N часов."""
+        """Пересказ последних событий чата за N часов."""
         try:
             chat_id = update.effective_chat.id
-            hours = getattr(self, "gossip_window_hours", 12)
-            limit = getattr(self, "gossip_limit", 250)
+            msgs = self.gossip_db.get_recent(chat_id, hours=self.gossip_window_hours, limit=self.gossip_limit)
 
-            msgs = self.gossip_db.get_recent(chat_id, hours=hours, limit=limit) if getattr(self, "gossip_db",
-                                                                                           None) else []
-            texts = [m.get("text", "").strip() for m in msgs if m.get("text")]
-            if len(texts) < 5:
+            if not msgs or len([m for m in msgs if m.get("text")]) < 5:
                 await update.message.reply_text("Пока мало новостей. Пишите активнее — тогда будут сплетни 😉")
                 return
 
-            # компактная лента (сверху новые)
+            # соберём компактный контекст для LLM
             def fmt(m):
-                name = (m.get("user_name") or "Кто-то").split("\n")[0]
+                name = m.get("user_name") or "Кто-то"
                 txt = m.get("text", "").replace("\n", " ").strip()
                 return f"{name}: {txt}"
 
-            sample = "\n".join(fmt(m) for m in msgs[: min(len(msgs), 180)])
+            sample = "\n".join(fmt(m) for m in msgs[:100])  # не более 100 сообщений
+            if len(sample) > 4000:
+                sample = sample[:4000] + " …"
 
             summary = None
-            # 1) сначала пробуем DeepSeek (если ключ есть)
-            if getattr(self, "deepseek_api_key", ""):
+            if self.deepseek_api_key:
                 prompt = (
-                        "Сделай краткий структурированный пересказ сообщений из группового чата за последние часы. "
-                        "Выдели: 1) главные темы, 2) кто что предложил/сделал, 3) договорённости и дедлайны, "
-                        "4) забавные моменты (кратко). Пиши по-русски, списком, без воды.\n\n"
-                        "Лента сообщений (сверху новые):\n" + sample
+                    "Сделай краткий структурированный пересказ сообщений из группового чата за последние часы. "
+                    "Выдели: 1) главные темы, 2) кто что предлагал/сделал, 3) договорённости и дедлайны, "
+                    "4) забавные моменты (кратко). Пиши по-русски, списком, без лишней воды. "
+                    "Если информация противоречива — отметь это. Вот лента сообщений (сверху новые):\n\n"
+                    f"{sample}"
                 )
-                messages = [
-                    {"role": "system", "content": "Ты помощник, делаешь ёмкие дайджесты чатов на русском."},
-                    {"role": "user", "content": prompt},
-                ]
-                reply = self._deepseek_chat(messages, temperature=0.3, max_tokens=700)
-                # если DeepSeek вернул “не удалось…/пусто”, считаем что не сработал
-                if reply and not reply.lower().startswith("не удалось") and "пустой ответ" not in reply.lower():
-                    summary = reply
+                headers = {
+                    "Authorization": f"Bearer {self.deepseek_api_key}",
+                    "Content-Type": "application/json",
+                    "Accept-Encoding": "gzip"
+                }
+                payload = {
+                    "model": "deepseek-chat",
+                    "messages": [{"role": "user", "content": prompt}],
+                    "temperature": 0.4,
+                    "max_tokens": 800,
+                    "stream": False
+                }
+                try:
+                    import requests
+                    r = requests.post(self.deepseek_api_url, headers=headers, json=payload, timeout=35)
+                    r.raise_for_status()
+                    data = r.json()
+                    summary = (data.get("choices", [{}])[0].get("message", {}) or {}).get("content")
+                except Exception as e:
+                    logger.warning(f"DeepSeek gossip summary failed: {e}")
 
-            # 2) нейтральный фолбэк без упоминания ключей
+            # Фолбэк без LLM
             if not summary:
-                # простая выжимка: топ-активность по авторам
-                top = {}
+                # Простая агрегирующая выжимка по повторяющимся словам/именам
+                top_users = {}
                 for m in msgs:
                     n = (m.get("user_name") or "Кто-то").split()[0]
-                    top[n] = top.get(n, 0) + 1
-                top_line = ", ".join(f"{k}×{v}" for k, v in sorted(top.items(), key=lambda x: -x[1])[:5])
+                    top_users[n] = top_users.get(n, 0) + 1
+                top = ", ".join([f"{k}×{v}" for k, v in sorted(top_users.items(), key=lambda x: -x[1])[:5]])
                 summary = (
-                    f"Коротко по чату за {hours}ч:\n"
-                    f"• Сообщений: {len(texts)}\n"
-                    f"• Самые активные: {top_line or '—'}\n"
-                    f"• Для подробного пересказа можно включить интеллект (если доступен).\n"
+                    "Коротко по чату:\n"
+                    f"• Сообщений: {len(msgs)} за {self.gossip_window_hours}ч\n"
+                    f"• Самые активные: {top or '—'}\n"
+                    "• Для детального пересказа подключите DeepSeek (DEEPSEEK_API_KEY).\n"
                 )
 
-            await update.message.reply_text(f"🫖 Сплетни:\n\n{summary}".strip()[:4000])
-
+            header = f"🫖 Сплетни за последние {self.gossip_window_hours}ч:"
+            await update.message.reply_text(f"{header}\n\n{summary}".strip()[:4000])
         except Exception as e:
             logger.error(f"Ошибка в gossip: {e}", exc_info=True)
             await update.message.reply_text("Не вышло собрать сплетни. Попробуй позже.")
-    """
+            """
     async def forecast(self, update, context, city: Optional[str] = None, cleaned_text: Optional[str] = None):
         try:
             # текст в двух видах: нижний для матчинга, исходный для извлечения города
@@ -985,13 +995,24 @@ class Handlers:
         # отправляем
         await update.message.reply_text(reply)
 
-    def _deepseek_chat(self, messages: list[dict], temperature: float = 0.4, max_tokens: int = 800) -> str:
+    def _deepseek_chat(
+            self,
+            messages: list[dict],
+            temperature: float = 0.4,
+            max_tokens: int = 800,
+            timeout: int = 20,
+            retries: int = 1,  # сколько раз повторить при сетевой ошибке
+    ) -> str:
         """
         Универсальный вызов DeepSeek ChatCompletion.
-        messages: [{"role":"system|user|assistant", "content":"..."}]
+        Возвращает ГОТОВЫЙ текст ответа или дружелюбное сообщение об ошибке.
+        Ничего не пробрасывает наружу.
         """
-        if not self.deepseek_api_key:
-            return "DeepSeek недоступен: не задан ключ (DEEPSEEK_API_KEY)."
+        import time
+        import requests
+
+        if not getattr(self, "deepseek_api_key", ""):
+            return "DeepSeek недоступен: не задан ключ."
 
         headers = {
             "Authorization": f"Bearer {self.deepseek_api_key}",
@@ -1001,17 +1022,38 @@ class Handlers:
         payload = {
             "model": "deepseek-chat",
             "messages": messages,
-            "temperature": temperature,
-            "max_tokens": max_tokens,
+            "temperature": float(temperature),
+            "max_tokens": int(max_tokens),
             "stream": False,
         }
-        try:
-            import requests
-            r = requests.post(self.deepseek_api_url, headers=headers, json=payload, timeout=35)
-            r.raise_for_status()
-            data = r.json()
-            msg = (data.get("choices", [{}])[0].get("message", {}) or {}).get("content")
-            return msg or "Пустой ответ от модели."
-        except Exception as e:
-            logger.error(f"DeepSeek chat error: {e}", exc_info=True)
-            return "Не удалось получить ответ от DeepSeek."
+
+        attempt = 0
+        while True:
+            try:
+                r = requests.post(self.deepseek_api_url, headers=headers, json=payload, timeout=timeout)
+                r.raise_for_status()
+                data = r.json()
+                msg = (data.get("choices", [{}])[0].get("message", {}) or {}).get("content")
+                return msg or "Пустой ответ от модели."
+            except requests.exceptions.ReadTimeout:
+                # конкретный таймаут — отвечаем мягко
+                if attempt >= retries:
+                    return "⏱️ DeepSeek не ответил вовремя. Попробуй ещё раз."
+            except (requests.exceptions.ConnectTimeout, requests.exceptions.ConnectionError):
+                if attempt >= retries:
+                    return "🌐 Не получилось связаться с DeepSeek. Попробуй ещё раз."
+            except requests.exceptions.HTTPError as e:
+                # логируем тело ответа для дебага, но пользователю коротко
+                try:
+                    body = r.text[:500]
+                except Exception:
+                    body = ""
+                logger.error(f"DeepSeek HTTP error: {e} | body: {body}")
+                return "⚠️ Ошибка ответа от DeepSeek."
+            except Exception as e:
+                logger.error(f"DeepSeek chat error: {e}", exc_info=True)
+                return "Не удалось получить ответ от DeepSeek."
+
+            # сюда попадаем только если будет повторная попытка
+            attempt += 1
+            time.sleep(0.8 * attempt)  # лёгкая экспонента между ретраями
