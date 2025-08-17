@@ -993,13 +993,24 @@ class Handlers:
         # отправляем
         await update.message.reply_text(reply)
 
-    def _deepseek_chat(self, messages: list[dict], temperature: float = 0.4, max_tokens: int = 800) -> str:
+    def _deepseek_chat(
+            self,
+            messages: list[dict],
+            temperature: float = 0.4,
+            max_tokens: int = 800,
+            timeout: int = 20,
+            retries: int = 1,  # сколько раз повторить при сетевой ошибке
+    ) -> str:
         """
         Универсальный вызов DeepSeek ChatCompletion.
-        messages: [{"role":"system|user|assistant", "content":"..."}]
+        Возвращает ГОТОВЫЙ текст ответа или дружелюбное сообщение об ошибке.
+        Ничего не пробрасывает наружу.
         """
-        if not self.deepseek_api_key:
-            return "DeepSeek недоступен: не задан ключ (DEEPSEEK_API_KEY)."
+        import time
+        import requests
+
+        if not getattr(self, "deepseek_api_key", ""):
+            return "DeepSeek недоступен: не задан ключ."
 
         headers = {
             "Authorization": f"Bearer {self.deepseek_api_key}",
@@ -1009,17 +1020,39 @@ class Handlers:
         payload = {
             "model": "deepseek-chat",
             "messages": messages,
-            "temperature": temperature,
-            "max_tokens": max_tokens,
+            "temperature": float(temperature),
+            "max_tokens": int(max_tokens),
             "stream": False,
         }
-        try:
-            import requests
-            r = requests.post(self.deepseek_api_url, headers=headers, json=payload, timeout=35)
-            r.raise_for_status()
-            data = r.json()
-            msg = (data.get("choices", [{}])[0].get("message", {}) or {}).get("content")
-            return msg or "Пустой ответ от модели."
-        except Exception as e:
-            logger.error(f"DeepSeek chat error: {e}", exc_info=True)
-            return "Не удалось получить ответ от DeepSeek."
+
+        attempt = 0
+        while True:
+            try:
+                r = requests.post(self.deepseek_api_url, headers=headers, json=payload, timeout=timeout)
+                r.raise_for_status()
+                data = r.json()
+                msg = (data.get("choices", [{}])[0].get("message", {}) or {}).get("content")
+                return msg or "Пустой ответ от модели."
+            except requests.exceptions.ReadTimeout:
+                # конкретный таймаут — отвечаем мягко
+                if attempt >= retries:
+                    return "⏱️ DeepSeek не ответил вовремя. Попробуй ещё раз."
+            except (requests.exceptions.ConnectTimeout, requests.exceptions.ConnectionError):
+                if attempt >= retries:
+                    return "🌐 Не получилось связаться с DeepSeek. Попробуй ещё раз."
+            except requests.exceptions.HTTPError as e:
+                # логируем тело ответа для дебага, но пользователю коротко
+                try:
+                    body = r.text[:500]
+                except Exception:
+                    body = ""
+                logger.error(f"DeepSeek HTTP error: {e} | body: {body}")
+                return "⚠️ Ошибка ответа от DeepSeek."
+            except Exception as e:
+                logger.error(f"DeepSeek chat error: {e}", exc_info=True)
+                return "Не удалось получить ответ от DeepSeek."
+
+            # сюда попадаем только если будет повторная попытка
+            attempt += 1
+            time.sleep(0.8 * attempt)  # лёгкая экспонента между ретраями
+
