@@ -32,7 +32,21 @@ class Handlers:
         self.gossip_db = GossipDB()  # 👈 новое
         self.gossip_window_hours = int(os.getenv("GOSSIP_WINDOW_HOURS", "12"))
         self.gossip_limit = int(os.getenv("GOSSIP_LIMIT", "250"))
-        #self.meteorf = MeteoRFClient()
+        self.deepseek_api_key = os.getenv("DEEPSEEK_API_KEY", "").strip()
+        self.deepseek_api_url = os.getenv(
+            "DEEPSEEK_API_URL",
+            "https://api.deepseek.com/v1/chat/completions"
+        ).strip()
+        # === DeepSeek диалог ===
+        self.dialog_on: dict[int, bool] = {}  # chat_id -> включён ли режим
+        self.dialog_history: dict[int, list] = {}  # chat_id -> список сообщений
+        self.DIALOG_MAX_TURNS = int(os.getenv("DIALOG_MAX_TURNS", "12"))  # сколько последних реплик держать
+        self.DIALOG_MAX_CHARS = int(os.getenv("DIALOG_MAX_CHARS", "1500"))  # защита от “портянок”
+        # системный промпт можно править в .env, иначе дефолт:
+        self.dialog_system = os.getenv("DIALOG_SYSTEM",
+                                       "Ты дружелюбный помощник по имени Лев. Отвечай кратко, по делу, на русском. "
+                                       "Сохраняй контекст беседы. Если просят код — давай рабочие примеры. "
+                                       "Если не уверен — уточняй.")
 
         # Загрузка цитат мудрости
         self._load_wisdom_quotes()
@@ -72,6 +86,16 @@ class Handlers:
 
             # Сплетни
             r'сплетн[иья]$|дай сплетни$|что новенького$': self.gossip,
+
+            # Диалог
+            r'диалог (?:включи|on|старт)$': self.dialog_enable,
+            r'диалог (?:выключи|off|стоп)$': self.dialog_disable,
+            r'диалог (?:сброс|забудь)$': self.dialog_reset_cmd,
+            r'диалог статус$': self.dialog_status,
+
+
+
+
 
 
         }
@@ -165,6 +189,17 @@ class Handlers:
                     return
 
             # 7) Если ничего не сматчилось
+                if self._dialog_enabled(update.effective_chat.id):
+                    # поддержим форму "диалог ..."
+                    lt = cleaned_text.lower()
+                    if lt.startswith("диалог "):
+                        cleaned_text = cleaned_text[7:].strip()
+                        if not cleaned_text:
+                            await update.message.reply_text("Скажи что-нибудь для диалога 🙂")
+                            return
+                    await self.dialog_answer(update, context, cleaned_text)
+                    return
+
             await update.message.reply_text("Не понимаю команду. Напиши 'помощь' для списка команд")
 
         except Exception as e:
@@ -220,6 +255,11 @@ class Handlers:
         lines.append("\nℹ️ <b>Справка</b>: <code>Лев помощь</code> или <code>Лев команды</code>")
         lines.append("⚙️ Триггер: сообщение должно <u>начинаться</u> с «Лев» или «Лёва».")
         return "\n".join(lines)
+
+        # Диалог
+        lines.append("• 🗣 <b>Диалог с ИИ</b>:")
+        lines.append("  <code>Лев диалог включи</code> / <code>Лев диалог выключи</code>")
+        lines.append("  <code>Лев диалог сброс</code> / <code>Лев диалог статус</code>")
 
     async def start_handler(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Приветствие + краткая инструкция."""
@@ -892,3 +932,94 @@ class Handlers:
             await update.message.reply_text("Ошибка при получении прогноза по коду.")
 """
 
+    def _dialog_enabled(self, chat_id: int) -> bool:
+        return bool(self.dialog_on.get(chat_id))
+
+    def _dialog_reset(self, chat_id: int):
+        self.dialog_history[chat_id] = []
+
+    def _dialog_push(self, chat_id: int, role: str, content: str):
+        if not content:
+            return
+        hist = self.dialog_history.setdefault(chat_id, [])
+        # подрежем слишком длинные
+        content = content.strip()
+        if len(content) > self.DIALOG_MAX_CHARS:
+            content = content[:self.DIALOG_MAX_CHARS] + " …"
+        hist.append({"role": role, "content": content})
+        # ограничим окно по последним репликам
+        if len(hist) > self.DIALOG_MAX_TURNS * 2 + 2:
+            self.dialog_history[chat_id] = hist[-(self.DIALOG_MAX_TURNS * 2 + 2):]
+
+    def _dialog_build_messages(self, chat_id: int) -> list[dict]:
+        msgs = [{"role": "system", "content": self.dialog_system}]
+        msgs.extend(self.dialog_history.get(chat_id, []))
+        return msgs
+
+    async def dialog_enable(self, update, context):
+        chat_id = update.effective_chat.id
+        self.dialog_on[chat_id] = True
+        # не сбрасываем историю, чтобы можно было “догнать” после включения; при желании — разкомментируй:
+        # self._dialog_reset(chat_id)
+        await update.message.reply_text("🟢 Диалог с контекстом включён. Пиши: «Лев …» и я буду помнить беседу.")
+
+    async def dialog_disable(self, update, context):
+        chat_id = update.effective_chat.id
+        self.dialog_on[chat_id] = False
+        await update.message.reply_text("⛔ Диалог выключен. Команды работают как обычно.")
+
+    async def dialog_reset_cmd(self, update, context):
+        chat_id = update.effective_chat.id
+        self._dialog_reset(chat_id)
+        await update.message.reply_text("♻️ История диалога очищена.")
+
+    async def dialog_status(self, update, context):
+        chat_id = update.effective_chat.id
+        on = "включён" if self._dialog_enabled(chat_id) else "выключен"
+        turns = len(self.dialog_history.get(chat_id, []))
+        await update.message.reply_text(f"ℹ️ Диалог {on}. В истории {turns} реплик.")
+
+    async def dialog_answer(self, update, context, cleaned_text: str):
+        """Отвечает через DeepSeek с сохранением контекста истории."""
+        chat_id = update.effective_chat.id
+        user_text = cleaned_text.strip()
+
+        # записываем юзера и спрашиваем модель
+        self._dialog_push(chat_id, "user", user_text)
+        msgs = self._dialog_build_messages(chat_id)
+        reply = self._deepseek_chat(msgs)
+        self._dialog_push(chat_id, "assistant", reply)
+
+        # отправляем
+        await update.message.reply_text(reply)
+
+    def _deepseek_chat(self, messages: list[dict], temperature: float = 0.4, max_tokens: int = 800) -> str:
+        """
+        Универсальный вызов DeepSeek ChatCompletion.
+        messages: [{"role":"system|user|assistant", "content":"..."}]
+        """
+        if not self.deepseek_api_key:
+            return "DeepSeek недоступен: не задан ключ (DEEPSEEK_API_KEY)."
+
+        headers = {
+            "Authorization": f"Bearer {self.deepseek_api_key}",
+            "Content-Type": "application/json",
+            "Accept-Encoding": "gzip",
+        }
+        payload = {
+            "model": "deepseek-chat",
+            "messages": messages,
+            "temperature": temperature,
+            "max_tokens": max_tokens,
+            "stream": False,
+        }
+        try:
+            import requests
+            r = requests.post(self.deepseek_api_url, headers=headers, json=payload, timeout=35)
+            r.raise_for_status()
+            data = r.json()
+            msg = (data.get("choices", [{}])[0].get("message", {}) or {}).get("content")
+            return msg or "Пустой ответ от модели."
+        except Exception as e:
+            logger.error(f"DeepSeek chat error: {e}", exc_info=True)
+            return "Не удалось получить ответ от DeepSeek."
