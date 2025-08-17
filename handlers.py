@@ -12,7 +12,6 @@ from models import QuoteDB, Feedback, GossipDB
 from typing import Optional, Dict, Any
 import asyncio
 from html import escape
-from meteorf_client import MeteoRFClient, MeteoRFError
 
 
 
@@ -33,7 +32,7 @@ class Handlers:
         self.gossip_db = GossipDB()  # 👈 новое
         self.gossip_window_hours = int(os.getenv("GOSSIP_WINDOW_HOURS", "12"))
         self.gossip_limit = int(os.getenv("GOSSIP_LIMIT", "250"))
-        self.meteorf = MeteoRFClient()
+        #self.meteorf = MeteoRFClient()
 
         # Загрузка цитат мудрости
         self._load_wisdom_quotes()
@@ -74,10 +73,6 @@ class Handlers:
             # Сплетни
             r'сплетн[иья]$|дай сплетни$|что новенького$': self.gossip,
 
-            # Прогноз
-            r'станц(?:ия|ии)?(?: в| по)? [\w\- а-яё]{3,}$': self.station_search,
-            r'прогноз(?: на)? недел[юи]?(?: в| по)? [\w\- а-яё]{3,}$': self.forecast,
-            r'прогноз(?: в| по)? [\w\- а-яё]{3,}$': self.forecast,
 
         }
 
@@ -176,22 +171,71 @@ class Handlers:
             logger.error(f"Ошибка обработки сообщения: {e}", exc_info=True)
             await update.message.reply_text("⚠️ Произошла ошибка при обработке запроса")
 
-    async def start_handler(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+    def _help_text(self) -> str:
+        """Формирует текст справки с учётом включённых фич."""
+        meteorf_on = getattr(self, "meteorf_enabled", False)
+        gossip_on = getattr(self, "gossip_db", None) is not None
+        deepseek_on = bool(getattr(self, "deepseek_api_key", None))
 
+        lines = []
+        lines.append("👋 <b>Привет!</b> Я Лев. Пиши моё имя в начале сообщения.\n")
+        lines.append("📚 <b>Что я умею</b>:")
+
+        # Погода (OpenWeather)
+        lines.append("• 🌦 <b>Погода сейчас</b>:")
+        lines.append("  <code>Лев погода Москва</code>")
+        lines.append("  <code>Лев какая погода в Нью-Йорке</code>")
+
+        # Прогноз MeteoRF — показываем только если включено
+        if meteorf_on:
+            lines.append("• 🗓 <b>Прогноз Гидрометцентра</b>:")
+            lines.append("  <code>Лев прогноз Москва</code>")
+            lines.append("  <code>Лев прогноз на неделю Казань</code>")
+
+        # Цитаты
+        lines.append("• 📝 <b>Цитаты из чата</b>:")
+        lines.append("  — Сохранить (ответом на сообщение): <code>цтт</code>")
+        lines.append("  — Случайная: <code>Лев цитата</code>  (покажу текст и автора)")
+
+        # Шутки / мудрость
+        lines.append("• 😂 <b>Шутки</b>: <code>Лев шутку</code>  |  🧠 <b>Мудрость</b>: <code>Лев мудрость</code>")
+
+        # Сплетни
+        if gossip_on:
+            lines.append("• 🫖 <b>Сплетни</b> (дайджест чата): <code>Лев сплетни</code>")
+
+        # DeepSeek QA
+        if deepseek_on:
+            lines.append("• 🤖 <b>Вопросы к ИИ</b>:")
+            lines.append("  <code>Лев ответь на вопрос почему не работает VPN</code>")
+            lines.append("  <code>Лев объясни как подключить вебхук</code>")
+
+        # Звания
+        lines.append("• 🏅 <b>Звания/розыгрыш</b>: <code>Лев звания</code>")
+
+        # Обратная связь
+        lines.append("• 📨 <b>Обратная связь</b>: <code>Лев фидбек</code> или <code>Лев предложение</code>")
+
+        # Справка
+        lines.append("\nℹ️ <b>Справка</b>: <code>Лев помощь</code> или <code>Лев команды</code>")
+        lines.append("⚙️ Триггер: сообщение должно <u>начинаться</u> с «Лев» или «Лёва».")
+        return "\n".join(lines)
+
+    async def start_handler(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Приветствие + краткая инструкция."""
         try:
-            await update.message.reply_text(
-                "Привет! Я бот Лёва. Вот что я умею:\n"
-                "- Рассказывать шутки и анекдоты\n"
-                "- Показывать погоду в любом городе\n"
-                "- Разыгрывать звания в чате\n"
-                "- Сохранять и показывать цитаты\n"
-                "- Давать мудрые советы\n\n"
-                "- Дать ссылочку на обратную связь\n\n"
-                "Просто напиши что-то вроде 'Лёва, расскажи шутку'"
-            )
+            user = update.effective_user.full_name if update.effective_user else "друг"
+            text = f"Привет, {user}!\n\n" + self._help_text()
+            await update.message.reply_text(text, parse_mode="HTML", disable_web_page_preview=True)
         except Exception as e:
-            logger.error(f"Ошибка в start_handler: {e}")
-            await update.message.reply_text("Не смог обработать запрос")
+            logger.error(f"start_handler error: {e}", exc_info=True)
+
+    async def info(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Полная справка по командам."""
+        try:
+            await update.message.reply_text(self._help_text(), parse_mode="HTML", disable_web_page_preview=True)
+        except Exception as e:
+            logger.error(f"info error: {e}", exc_info=True)
 
     async def weather(self, update: Update, context: ContextTypes.DEFAULT_TYPE, city: Optional[str] = None):
 
@@ -254,22 +298,7 @@ class Handlers:
             logger.error(f"Ошибка в wisdom: {e}")
             await update.message.reply_text("Произошла ошибка при поиске мудрости. Попробуй позже.")
 
-    async def start_handler(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
 
-        try:
-            await update.message.reply_text(
-                "Привет! Я бот Лёва. Вот что я умею:\n"
-                "- Рассказывать шутки и анекдоты\n"
-                "- Показывать погоду в любом городе\n"
-                "- Разыгрывать звания в чате\n"
-                "- Сохранять и показывать цитаты\n"
-                "- Давать мудрые советы\n\n"
-                "- Так же я могу дать ссылку на обратную связь\n\n"
-                "Просто напиши что-то вроде 'Лёва, расскажи шутку'"
-            )
-        except Exception as e:
-            logger.error(f"Ошибка в start_handler: {e}")
-            await update.message.reply_text("Не смог обработать запрос")
 
     async def weather(
             self,
@@ -346,24 +375,7 @@ class Handlers:
             logger.error(f"Ошибка в шутке: {e}")
             await update.message.reply_text("Произошла ошибка при получении шутки. Попробуй позже.")
 
-    async def info(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
 
-        try:
-            commands = [
-                "Как общаться со мной:",
-                "- 'Лёва, расскажи шутку'",
-                "- 'Лёва, погода  Москва'",
-                "- 'Лёва, разыграй звания'",
-                "- 'Лёва, что ты умеешь?'",
-                "- 'Лёва, скажи мудрость'",
-                "- 'Лёва, что ты умеешь?'"
-                "- 'Лёва, скажи мудрость'"
-                "- 'Лева, цитату'"
-            ]
-            await update.message.reply_text("\n".join(commands))
-        except Exception as e:
-            logger.error(f"Ошибка в info: {e}")
-            await update.message.reply_text("Произошла ошибка. Попробуй позже.")
 
     async def assign_titles(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
 
@@ -742,7 +754,7 @@ class Handlers:
         except Exception as e:
             logger.error(f"Ошибка в gossip: {e}", exc_info=True)
             await update.message.reply_text("Не вышло собрать сплетни. Попробуй позже.")
-"""
+    """
     async def forecast(self, update, context, city: Optional[str] = None, cleaned_text: Optional[str] = None):
         try:
             # текст в двух видах: нижний для матчинга, исходный для извлечения города
