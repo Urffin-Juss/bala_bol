@@ -2,6 +2,8 @@ from telegram import InlineKeyboardMarkup, InlineKeyboardButton
 import sqlite3
 import logging
 from typing import Optional, Dict
+from typing import List, Any, Optional
+from datetime import datetime, timedelta
 
 logger = logging.getLogger(__name__)
 
@@ -89,3 +91,42 @@ class Feedback:
         except Exception as e:
             logger.error(f"Feedback error: {e}")
             await update.message.reply_text("⚠️ Ошибка при открытии формы")
+
+
+class GossipDB:
+    def __init__(self, path: str = "quotes.db"):
+        self.path = path
+        self._init()
+
+    def _init(self):
+        with sqlite3.connect(self.path) as con:
+            con.execute("""
+            CREATE TABLE IF NOT EXISTS chat_messages (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                chat_id INTEGER NOT NULL,
+                user_id INTEGER,
+                user_name TEXT,
+                text TEXT NOT NULL,
+                created_at TIMESTAMP NOT NULL
+            );
+            """)
+            con.execute("CREATE INDEX IF NOT EXISTS idx_chat_time ON chat_messages(chat_id, created_at);")
+
+    def add_message(self, chat_id: int, user_id: Optional[int], user_name: str, text: str):
+        if not text: return
+        with sqlite3.connect(self.path) as con:
+            con.execute(
+                "INSERT INTO chat_messages (chat_id, user_id, user_name, text, created_at) VALUES (?, ?, ?, ?, ?)",
+                (chat_id, user_id, user_name, text[:2000], datetime.utcnow().isoformat())
+            )
+
+    def get_recent(self, chat_id: int, hours: int = 12, limit: int = 300) -> List[Dict[str, Any]]:
+        since = datetime.utcnow() - timedelta(hours=hours)
+        with sqlite3.connect(self.path) as con:
+            con.row_factory = sqlite3.Row
+            rows = con.execute(
+                "SELECT user_name, text, created_at FROM chat_messages "
+                "WHERE chat_id=? AND created_at>=? ORDER BY id DESC LIMIT ?",
+                (chat_id, since.isoformat(), limit)
+            ).fetchall()
+        return [dict(r) for r in rows]
