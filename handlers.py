@@ -12,6 +12,7 @@ from models import QuoteDB, Feedback, GossipDB
 from typing import Optional, Dict, Any
 import asyncio
 from html import escape
+from news_client import NewsClient
 
 
 
@@ -27,6 +28,7 @@ class Handlers:
         self.deepseek_api_url = "https://api.deepseek.com/v1/chat/completions"
         self.bot_names = ["бот", "лев"]
         self.db = db
+        self.news = NewsClient()
         self.feedback = feedback
         self.wisdom_quotes = []
         self.gossip_db = GossipDB()  # 👈 новое
@@ -92,6 +94,12 @@ class Handlers:
             r'диалог (?:выключи|off|стоп)$': self.dialog_disable,
             r'диалог (?:сброс|забудь)$': self.dialog_reset_cmd,
             r'диалог статус$': self.dialog_status,
+
+            # Новости
+
+            r'новост[ьи]$': self.news_handler,
+            r'новост[ьи]\s+.+$': self.news_handler,
+
 
 
 
@@ -1057,3 +1065,38 @@ class Handlers:
             # сюда попадаем только если будет повторная попытка
             attempt += 1
             time.sleep(0.8 * attempt)  # лёгкая экспонента между ретраями
+
+    async def news_handler(self, update, context, cleaned_text: str = None):
+        try:
+            # заберём оригинальный текст без "Лев", чтобы сохранить регистр у запроса
+            raw_full = update.message.text or ""
+            orig_cleaned = re.sub(
+                rf'^\s*({"|".join(map(re.escape, self.bot_names))})[\s,!?.]*\s*',
+                '',
+                raw_full,
+                flags=re.IGNORECASE
+            ).strip()
+
+            # есть ли запрос после слова "новости"
+            m = re.match(r'новост[ьи]\s*(.*)$', orig_cleaned, flags=re.IGNORECASE)
+            query = (m.group(1) or "").strip()
+
+            items = self.news.search(query) if query else self.news.top()
+            if not items:
+                await update.message.reply_text("Не нашёл новостей. Попробуй другой запрос.")
+                return
+
+            title = f"📰 Новости" + (f" по запросу: {query}" if query else "")
+            lines = [title + ":\n"]
+            for i, it in enumerate(items, 1):
+                t = it["title"] or "Без заголовка"
+                link = it["link"]
+                src = it.get("source") or ""
+                # покажем как кликабельную ссылку
+                lines.append(f"{i}. <a href=\"{link}\">{t}</a>" + (f" — <i>{src}</i>" if src else ""))
+
+            await update.message.reply_text("\n".join(lines), parse_mode="HTML", disable_web_page_preview=False)
+        except Exception as e:
+            logger.error(f"news_handler error: {e}", exc_info=True)
+            await update.message.reply_text("Не получилось получить новости сейчас.")
+
