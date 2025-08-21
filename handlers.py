@@ -1083,7 +1083,10 @@ class Handlers:
 
             items = self.news.search(query) if query else self.news.top()
             if not items:
-                await update.message.reply_text("Не нашёл новостей. Попробуй другой запрос.")
+                msg = "Не нашёл новостей."
+                if not query:
+                    msg += " Попробуй: <code>Лев новости спорт</code> или <code>Лев новости ИИ</code>."
+                await update.message.reply_text(msg, parse_mode="HTML")
                 return
 
             title = f"📰 Новости" + (f" по запросу: {query}" if query else "")
