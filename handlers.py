@@ -5,7 +5,7 @@ from dotenv import load_dotenv
 import os
 import requests
 import random
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, date
 import re
 from pathlib import Path
 from models import QuoteDB, Feedback, GossipDB
