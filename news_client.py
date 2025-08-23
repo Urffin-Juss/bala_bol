@@ -6,6 +6,7 @@ from typing import List, Dict
 from requests.adapters import HTTPAdapter
 import requests
 import feedparser
+from urllib.parse import quote
 from urllib3.util.retry import Retry
 
 log = logging.getLogger(__name__)
