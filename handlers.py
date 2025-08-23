@@ -13,6 +13,7 @@ from typing import Optional, Dict, Any
 import asyncio
 from html import escape
 from news_client import NewsClient
+from holidays_client import HolidaysClient
 
 
 
@@ -35,6 +36,8 @@ class Handlers:
         self.gossip_window_hours = int(os.getenv("GOSSIP_WINDOW_HOURS", "12"))
         self.gossip_limit = int(os.getenv("GOSSIP_LIMIT", "250"))
         self.deepseek_api_key = os.getenv("DEEPSEEK_API_KEY", "").strip()
+        self.holidays = HolidaysClient(country=os.getenv("HOLIDAYS_COUNTRY", "RU"))
+        self.tz_hours = int(os.getenv("BOT_TZ_HOURS", "3"))
         self.deepseek_api_url = os.getenv(
             "DEEPSEEK_API_URL",
             "https://api.deepseek.com/v1/chat/completions"
@@ -99,6 +102,15 @@ class Handlers:
 
             r'новост[ьи]$': self.news_handler,
             r'новост[ьи]\s+.+$': self.news_handler,
+
+            # Праздники
+
+            r'какой сегодня день$': self.holidays_handler,
+            r'какой завтра день$': self.holidays_handler,
+            r'какой послезавтра день$': self.holidays_handler,
+            r'праздник[и]?(?: на)? (?:сегодня|завтра|послезавтра)$': self.holidays_handler,
+            r'праздник[и]?(?: на)? [\d.\sа-яё]+$': self.holidays_handler,  # конкретная дата
+            r'календарь$': self.holidays_handler,
 
 
 
@@ -1101,4 +1113,103 @@ class Handlers:
         except Exception as e:
             logger.error(f"news_handler error: {e}", exc_info=True)
             await update.message.reply_text("Не получилось получить новости сейчас.")
+
+    async def holidays_handler(self, update, context, cleaned_text: str = None):
+        """
+        Примеры:
+          Лев какой сегодня день
+          Лев какой завтра день
+          Лев праздники на послезавтра
+          Лев праздники 1 мая
+          Лев праздники 09.05
+          Лев календарь
+        """
+        try:
+            raw_full = update.message.text or ""
+            # оригинальный текст без «Лев/Лёва», чтобы сохранить регистр
+            orig_cleaned = re.sub(
+                rf'^\s*({"|".join(map(re.escape, self.bot_names))})[\s,!?.]*\s*',
+                '',
+                raw_full,
+                flags=re.IGNORECASE
+            ).strip()
+
+            low = orig_cleaned.lower()
+
+            # 1) относительные даты
+            if re.search(r'\bсегодня\b', low):
+                day_label = "Сегодня"
+                titles = self.holidays.today(tz_offset_hours=self.tz_hours)
+            elif re.search(r'\bзавтра\b', low):
+                day_label = "Завтра"
+                titles = self.holidays.relative(1, tz_offset_hours=self.tz_hours)
+            elif "послезавтра" in low:
+                day_label = "Послезавтра"
+                titles = self.holidays.relative(2, tz_offset_hours=self.tz_hours)
+            else:
+                # 2) конкретная дата: "1 мая", "09.05", "5 ноября", "1.05"
+                d = self._parse_russian_date(low)
+                if d:
+                    day_label = d.strftime("%d.%m.%Y")
+                    titles = self.holidays.on_date(d)
+                else:
+                    # если просто "календарь" или не распознали — считаем "сегодня"
+                    day_label = "Сегодня"
+                    titles = self.holidays.today(tz_offset_hours=self.tz_hours)
+
+            if titles:
+                items = "\n".join(f"• {t}" for t in titles)
+                await update.message.reply_text(f"📅 {day_label}:\n{items}")
+            else:
+                await update.message.reply_text(f"📅 {day_label}: похоже, официальных праздников нет.")
+        except Exception as e:
+            logger.error(f"holidays_handler error: {e}", exc_info=True)
+            await update.message.reply_text("Не получилось получить календарь праздников.")
+
+    def _parse_russian_date(self, text: str) -> Optional[date]:
+        """
+        Понимает форматы:
+          - 1 мая / 5 ноября / 12 июня
+          - 01.05 / 1.5 / 09.05.2025
+        Возвращает date в текущем году, если год не указан.
+        """
+        months = {
+            "янв": 1, "январ": 1,
+            "фев": 2, "феврал": 2,
+            "мар": 3, "март": 3,
+            "апр": 4, "апрел": 4,
+            "мая": 5, "май": 5,
+            "июн": 6, "июнь": 6,
+            "июл": 7, "июль": 7,
+            "авг": 8, "август": 8,
+            "сен": 9, "сентябр": 9,
+            "окт": 10, "октябр": 10,
+            "ноя": 11, "ноябр": 11,
+            "дек": 12, "декабр": 12,
+        }
+
+        # 1) числовые форматы: 09.05 / 9.5 / 09.05.2025
+        m = re.search(r'(\d{1,2})[.\-/](\d{1,2})(?:[.\-/](\d{4}))?', text)
+        if m:
+            day = int(m.group(1))
+            month = int(m.group(2))
+            year = int(m.group(3)) if m.group(3) else datetime.utcnow().year
+            try:
+                return date(year, month, day)
+            except ValueError:
+                return None
+
+        # 2) словесные: "1 мая", "5 ноября"
+        m = re.search(r'(\d{1,2})\s+([а-яё]+)', text)
+        if m:
+            day = int(m.group(1))
+            mon_word = m.group(2)
+            for key, mon in months.items():
+                if mon_word.startswith(key):
+                    try:
+                        return date(datetime.utcnow().year, mon, day)
+                    except ValueError:
+                        return None
+        return None
+
 
