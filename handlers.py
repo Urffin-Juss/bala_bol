@@ -804,8 +804,8 @@ class Handlers:
         except Exception as e:
             logger.error(f"Ошибка в gossip: {e}", exc_info=True)
             await update.message.reply_text("Не вышло собрать сплетни. Попробуй позже.")
-            """
-    async def forecast(self, update, context, city: Optional[str] = None, cleaned_text: Optional[str] = None):
+
+    """ async def forecast(self, update, context, city: Optional[str] = None, cleaned_text: Optional[str] = None):
         try:
             # текст в двух видах: нижний для матчинга, исходный для извлечения города
             raw_full = update.message.text or ""
@@ -939,8 +939,7 @@ class Handlers:
             await update.message.reply_text("\n".join(lines))
         except Exception as e:
             logger.error(f"forecast_by_code error: {e}", exc_info=True)
-            await update.message.reply_text("Ошибка при получении прогноза по коду.")
-"""
+            await update.message.reply_text("Ошибка при получении прогноза по коду.") """
 
     def _dialog_enabled(self, chat_id: int) -> bool:
         return bool(self.dialog_on.get(chat_id))
