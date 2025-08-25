@@ -5,13 +5,15 @@ from dotenv import load_dotenv
 import os
 import requests
 import random
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, date
 import re
 from pathlib import Path
 from models import QuoteDB, Feedback, GossipDB
 from typing import Optional, Dict, Any
 import asyncio
 from html import escape
+from news_client import NewsClient
+from holidays_client import HolidaysClient
 
 
 
@@ -27,12 +29,15 @@ class Handlers:
         self.deepseek_api_url = "https://api.deepseek.com/v1/chat/completions"
         self.bot_names = ["бот", "лев"]
         self.db = db
+        self.news = NewsClient()
         self.feedback = feedback
         self.wisdom_quotes = []
         self.gossip_db = GossipDB()  # 👈 новое
         self.gossip_window_hours = int(os.getenv("GOSSIP_WINDOW_HOURS", "12"))
         self.gossip_limit = int(os.getenv("GOSSIP_LIMIT", "250"))
         self.deepseek_api_key = os.getenv("DEEPSEEK_API_KEY", "").strip()
+        self.holidays = HolidaysClient(country=os.getenv("HOLIDAYS_COUNTRY", "RU"))
+        self.tz_hours = int(os.getenv("BOT_TZ_HOURS", "3"))
         self.deepseek_api_url = os.getenv(
             "DEEPSEEK_API_URL",
             "https://api.deepseek.com/v1/chat/completions"
@@ -92,6 +97,21 @@ class Handlers:
             r'диалог (?:выключи|off|стоп)$': self.dialog_disable,
             r'диалог (?:сброс|забудь)$': self.dialog_reset_cmd,
             r'диалог статус$': self.dialog_status,
+
+            # Новости
+
+            r'новост[ьи]$': self.news_handler,
+            r'новост[ьи]\s+.+$': self.news_handler,
+
+            # Праздники
+
+            r'какой сегодня день$': self.holidays_handler,
+            r'какой завтра день$': self.holidays_handler,
+            r'какой послезавтра день$': self.holidays_handler,
+            r'праздник[и]?(?: на)? (?:сегодня|завтра|послезавтра)$': self.holidays_handler,
+            r'праздник[и]?(?: на)? [\d.\sа-яё]+$': self.holidays_handler,  # конкретная дата
+            r'календарь$': self.holidays_handler,
+
 
 
 
@@ -207,59 +227,75 @@ class Handlers:
             await update.message.reply_text("⚠️ Произошла ошибка при обработке запроса")
 
     def _help_text(self) -> str:
-        """Формирует текст справки с учётом включённых фич."""
+        """Формирует текст справки с учётом подключённых фич."""
         meteorf_on = getattr(self, "meteorf_enabled", False)
         gossip_on = getattr(self, "gossip_db", None) is not None
         deepseek_on = bool(getattr(self, "deepseek_api_key", None))
+        news_on = hasattr(self, "news")
+        holidays_on = hasattr(self, "holidays")
 
         lines = []
-        lines.append("👋 <b>Привет!</b> Я Лев. Пиши моё имя в начале сообщения.\n")
-        lines.append("📚 <b>Что я умею</b>:")
+        lines.append("👋 <b>Привет!</b> Я Лев. Отвечаю, если сообщение <u>начинается</u> с «Лев» или «Лёва».")
+        lines.append("")
+        lines.append("📚 <b>Что умею</b>:")
 
-        # Погода (OpenWeather)
-        lines.append("• 🌦 <b>Погода сейчас</b>:")
+        # Погода (текущая)
+        lines.append("• 🌦 <b>Погода сейчас</b>")
         lines.append("  <code>Лев погода Москва</code>")
         lines.append("  <code>Лев какая погода в Нью-Йорке</code>")
 
-        # Прогноз MeteoRF — показываем только если включено
+        # Прогноз MeteoRF (если когда-нибудь включим обратно)
         if meteorf_on:
-            lines.append("• 🗓 <b>Прогноз Гидрометцентра</b>:")
-            lines.append("  <code>Лев прогноз Москва</code>")
-            lines.append("  <code>Лев прогноз на неделю Казань</code>")
+            lines.append("• 🗓 <b>Прогноз (Гидрометцентр)</b>")
+            lines.append("  <code>Лев прогноз Москва</code> | <code>Лев прогноз на неделю Казань</code>")
+
+        # Новости
+        if news_on:
+            lines.append("• 📰 <b>Новости</b>")
+            lines.append("  <code>Лев новости</code> — главные (Яндекс)")
+            lines.append(
+                "  <code>Лев новости спорт</code> / <code>политика</code> / <code>экономика</code> / <code>технологии</code> / <code>культура</code> / <code>наука</code>")
+            lines.append("  <code>Лев новости доллар</code> — поиск по запросу (Google/Bing)")
+
+        # Праздники / «какой сегодня день»
+        if holidays_on:
+            lines.append("• 🎉 <b>Праздники и памятные даты</b>")
+            lines.append("  <code>Лев какой сегодня день</code> / <code>завтра</code> / <code>послезавтра</code>")
+            lines.append("  <code>Лев праздники 1 мая</code> • <code>Лев праздники 09.05</code>")
 
         # Цитаты
-        lines.append("• 📝 <b>Цитаты из чата</b>:")
-        lines.append("  — Сохранить (ответом на сообщение): <code>цтт</code>")
-        lines.append("  — Случайная: <code>Лев цитата</code>  (покажу текст и автора)")
+        lines.append("• 📝 <b>Цитаты из чата</b>")
+        lines.append("  ответом на сообщение: <code>цтт</code> — сохранить")
+        lines.append("  <code>Лев цитата</code> — случайная (с автором)")
 
         # Шутки / мудрость
-        lines.append("• 😂 <b>Шутки</b>: <code>Лев шутку</code>  |  🧠 <b>Мудрость</b>: <code>Лев мудрость</code>")
+        lines.append("• 😂 <b>Шутки</b>: <code>Лев шутку</code>   |   🧠 <b>Мудрость</b>: <code>Лев мудрость</code>")
 
-        # Сплетни
+        # Сплетни (дайджест чата)
         if gossip_on:
-            lines.append("• 🫖 <b>Сплетни</b> (дайджест чата): <code>Лев сплетни</code>")
+            lines.append("• 🫖 <b>Сплетни</b> — дайджест чата за последние часы")
+            lines.append("  <code>Лев сплетни</code>")
 
-        # DeepSeek QA
+        # Диалог с DeepSeek
         if deepseek_on:
-            lines.append("• 🤖 <b>Вопросы к ИИ</b>:")
-            lines.append("  <code>Лев ответь на вопрос почему не работает VPN</code>")
-            lines.append("  <code>Лев объясни как подключить вебхук</code>")
+            lines.append("• 🗣 <b>Диалог с ИИ (DeepSeek)</b>")
+            lines.append(
+                "  <code>Лев диалог включи</code> / <code>выключи</code> / <code>сброс</code> / <code>статус</code>")
+            lines.append("  Включён — любые «Лев …» без команды идут в разговор с учётом контекста.")
+        else:
+            lines.append("• 🗣 Диалог с ИИ можно включить при наличии ключа DeepSeek.")
 
         # Звания
-        lines.append("• 🏅 <b>Звания/розыгрыш</b>: <code>Лев звания</code>")
+        lines.append("• 🏅 <b>Звания</b>: <code>Лев звания</code>")
 
         # Обратная связь
-        lines.append("• 📨 <b>Обратная связь</b>: <code>Лев фидбек</code> или <code>Лев предложение</code>")
+        lines.append("• 📨 <b>Обратная связь/предложения</b>")
+        lines.append("  <code>Лев фидбек</code>   |   <code>Лев предложение</code>")
 
-        # Справка
-        lines.append("\nℹ️ <b>Справка</b>: <code>Лев помощь</code> или <code>Лев команды</code>")
-        lines.append("⚙️ Триггер: сообщение должно <u>начинаться</u> с «Лев» или «Лёва».")
+        lines.append("")
+        lines.append("ℹ️ Подсказка: обращение должно быть первым словом: <i>«Лев …»</i>.")
+
         return "\n".join(lines)
-
-        # Диалог
-        lines.append("• 🗣 <b>Диалог с ИИ</b>:")
-        lines.append("  <code>Лев диалог включи</code> / <code>Лев диалог выключи</code>")
-        lines.append("  <code>Лев диалог сброс</code> / <code>Лев диалог статус</code>")
 
     async def start_handler(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Приветствие + краткая инструкция."""
@@ -273,9 +309,14 @@ class Handlers:
     async def info(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Полная справка по командам."""
         try:
-            await update.message.reply_text(self._help_text(), parse_mode="HTML", disable_web_page_preview=True)
+            await update.message.reply_text(
+                self._help_text(),
+                parse_mode="HTML",
+                disable_web_page_preview=True
+            )
         except Exception as e:
             logger.error(f"info error: {e}", exc_info=True)
+            await update.message.reply_text("Не получилось показать справку.")
 
     async def weather(self, update: Update, context: ContextTypes.DEFAULT_TYPE, city: Optional[str] = None):
 
@@ -796,8 +837,8 @@ class Handlers:
         except Exception as e:
             logger.error(f"Ошибка в gossip: {e}", exc_info=True)
             await update.message.reply_text("Не вышло собрать сплетни. Попробуй позже.")
-            """
-    async def forecast(self, update, context, city: Optional[str] = None, cleaned_text: Optional[str] = None):
+
+    """ async def forecast(self, update, context, city: Optional[str] = None, cleaned_text: Optional[str] = None):
         try:
             # текст в двух видах: нижний для матчинга, исходный для извлечения города
             raw_full = update.message.text or ""
@@ -931,8 +972,7 @@ class Handlers:
             await update.message.reply_text("\n".join(lines))
         except Exception as e:
             logger.error(f"forecast_by_code error: {e}", exc_info=True)
-            await update.message.reply_text("Ошибка при получении прогноза по коду.")
-"""
+            await update.message.reply_text("Ошибка при получении прогноза по коду.") """
 
     def _dialog_enabled(self, chat_id: int) -> bool:
         return bool(self.dialog_on.get(chat_id))
@@ -1057,3 +1097,140 @@ class Handlers:
             # сюда попадаем только если будет повторная попытка
             attempt += 1
             time.sleep(0.8 * attempt)  # лёгкая экспонента между ретраями
+
+    async def news_handler(self, update, context, cleaned_text: str = None):
+        try:
+            # заберём оригинальный текст без "Лев", чтобы сохранить регистр у запроса
+            raw_full = update.message.text or ""
+            orig_cleaned = re.sub(
+                rf'^\s*({"|".join(map(re.escape, self.bot_names))})[\s,!?.]*\s*',
+                '',
+                raw_full,
+                flags=re.IGNORECASE
+            ).strip()
+
+            # есть ли запрос после слова "новости"
+            m = re.match(r'новост[ьи]\s*(.*)$', orig_cleaned, flags=re.IGNORECASE)
+            query = (m.group(1) or "").strip()
+
+            items = self.news.search(query) if query else self.news.top()
+            if not items:
+                msg = "Не нашёл новостей."
+                if not query:
+                    msg += " Попробуй: <code>Лев новости спорт</code> или <code>Лев новости ИИ</code>."
+                await update.message.reply_text(msg, parse_mode="HTML")
+                return
+
+            title = f"📰 Новости" + (f" по запросу: {query}" if query else "")
+            lines = [title + ":\n"]
+            for i, it in enumerate(items, 1):
+                t = it["title"] or "Без заголовка"
+                link = it["link"]
+                src = it.get("source") or ""
+                # покажем как кликабельную ссылку
+                lines.append(f"{i}. <a href=\"{link}\">{t}</a>" + (f" — <i>{src}</i>" if src else ""))
+
+            await update.message.reply_text("\n".join(lines), parse_mode="HTML", disable_web_page_preview=False)
+        except Exception as e:
+            logger.error(f"news_handler error: {e}", exc_info=True)
+            await update.message.reply_text("Не получилось получить новости сейчас.")
+
+    async def holidays_handler(self, update, context, cleaned_text: str = None):
+        """
+        Примеры:
+          Лев какой сегодня день
+          Лев какой завтра день
+          Лев праздники на послезавтра
+          Лев праздники 1 мая
+          Лев праздники 09.05
+          Лев календарь
+        """
+        try:
+            raw_full = update.message.text or ""
+            # оригинальный текст без «Лев/Лёва», чтобы сохранить регистр
+            orig_cleaned = re.sub(
+                rf'^\s*({"|".join(map(re.escape, self.bot_names))})[\s,!?.]*\s*',
+                '',
+                raw_full,
+                flags=re.IGNORECASE
+            ).strip()
+
+            low = orig_cleaned.lower()
+
+            # 1) относительные даты
+            if re.search(r'\bсегодня\b', low):
+                day_label = "Сегодня"
+                titles = self.holidays.today(tz_offset_hours=self.tz_hours)
+            elif re.search(r'\bзавтра\b', low):
+                day_label = "Завтра"
+                titles = self.holidays.relative(1, tz_offset_hours=self.tz_hours)
+            elif "послезавтра" in low:
+                day_label = "Послезавтра"
+                titles = self.holidays.relative(2, tz_offset_hours=self.tz_hours)
+            else:
+                # 2) конкретная дата: "1 мая", "09.05", "5 ноября", "1.05"
+                d = self._parse_russian_date(low)
+                if d:
+                    day_label = d.strftime("%d.%m.%Y")
+                    titles = self.holidays.on_date(d)
+                else:
+                    # если просто "календарь" или не распознали — считаем "сегодня"
+                    day_label = "Сегодня"
+                    titles = self.holidays.today(tz_offset_hours=self.tz_hours)
+
+            if titles:
+                items = "\n".join(f"• {t}" for t in titles)
+                await update.message.reply_text(f"📅 {day_label}:\n{items}")
+            else:
+                await update.message.reply_text(f"📅 {day_label}: похоже, официальных праздников нет.")
+        except Exception as e:
+            logger.error(f"holidays_handler error: {e}", exc_info=True)
+            await update.message.reply_text("Не получилось получить календарь праздников.")
+
+    def _parse_russian_date(self, text: str) -> Optional[date]:
+        """
+        Понимает форматы:
+          - 1 мая / 5 ноября / 12 июня
+          - 01.05 / 1.5 / 09.05.2025
+        Возвращает date в текущем году, если год не указан.
+        """
+        months = {
+            "янв": 1, "январ": 1,
+            "фев": 2, "феврал": 2,
+            "мар": 3, "март": 3,
+            "апр": 4, "апрел": 4,
+            "мая": 5, "май": 5,
+            "июн": 6, "июнь": 6,
+            "июл": 7, "июль": 7,
+            "авг": 8, "август": 8,
+            "сен": 9, "сентябр": 9,
+            "окт": 10, "октябр": 10,
+            "ноя": 11, "ноябр": 11,
+            "дек": 12, "декабр": 12,
+        }
+
+        # 1) числовые форматы: 09.05 / 9.5 / 09.05.2025
+        m = re.search(r'(\d{1,2})[.\-/](\d{1,2})(?:[.\-/](\d{4}))?', text)
+        if m:
+            day = int(m.group(1))
+            month = int(m.group(2))
+            year = int(m.group(3)) if m.group(3) else datetime.utcnow().year
+            try:
+                return date(year, month, day)
+            except ValueError:
+                return None
+
+        # 2) словесные: "1 мая", "5 ноября"
+        m = re.search(r'(\d{1,2})\s+([а-яё]+)', text)
+        if m:
+            day = int(m.group(1))
+            mon_word = m.group(2)
+            for key, mon in months.items():
+                if mon_word.startswith(key):
+                    try:
+                        return date(datetime.utcnow().year, mon, day)
+                    except ValueError:
+                        return None
+        return None
+
+
